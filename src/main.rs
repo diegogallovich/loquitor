@@ -142,10 +142,7 @@ fn cmd_status() -> Result<()> {
 fn cmd_lanes() -> Result<()> {
     // TODO: query the daemon via IPC for live lane data.
     // For v0.1.0 we print the column header and a placeholder message.
-    println!(
-        "  {:<12}{:<9}{:<8}{}",
-        "LANE", "VOICE", "AGE", "LAST SPOKEN"
-    );
+    println!("  {:<12}{:<9}{:<8}LAST SPOKEN", "LANE", "VOICE", "AGE");
     println!(
         "{}",
         "  (lane enumeration via IPC is planned for a future release)".dimmed()
