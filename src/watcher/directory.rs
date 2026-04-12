@@ -51,7 +51,7 @@ impl DirectoryWatcher {
         while let Some(event) = notify_rx.recv().await {
             if matches!(event.kind, EventKind::Create(_)) {
                 for path in &event.paths {
-                    if path.extension().map_or(false, |e| e == "log") {
+                    if path.extension().is_some_and(|e| e == "log") {
                         self.spawn_lane_watcher(path.clone());
                     }
                 }
