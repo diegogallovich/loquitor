@@ -24,7 +24,7 @@ pub enum AudioFormat {
     Aiff,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AudioData {
     pub bytes: Bytes,
     pub format: AudioFormat,
