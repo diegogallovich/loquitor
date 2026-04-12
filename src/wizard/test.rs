@@ -15,10 +15,12 @@ pub async fn test_audio(provider: &dyn TtsProvider, voice: &str) -> Result<bool>
         Ok(audio) => {
             // play_audio is blocking — run on blocking thread pool
             let audio_clone = audio.clone();
-            tokio::task::spawn_blocking(move || player::play_audio(&audio_clone))
-                .await
-                .unwrap_or(Ok(()))?;
-            println!("  {}", "✓ Audio played successfully".green());
+            let join_result = tokio::task::spawn_blocking(move || player::play_audio(&audio_clone)).await;
+            match join_result {
+                Ok(Ok(())) => println!("  {}", "✓ Audio played successfully".green()),
+                Ok(Err(e)) => println!("  {} {}", "✗ Audio failed:".red(), e),
+                Err(join_err) => println!("  {} {}", "✗ Audio task panicked:".red(), join_err),
+            }
         }
         Err(e) => {
             println!("  {} {}", "✗ Audio failed:".red(), e);

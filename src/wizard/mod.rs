@@ -2,7 +2,7 @@ pub mod provider;
 pub mod test;
 pub mod voice;
 
-use crate::config::{self, types::Config};
+use crate::config::{self, types::{Config, VoiceConfig}};
 use crate::tts;
 use anyhow::Result;
 use colored::Colorize;
@@ -27,10 +27,16 @@ pub async fn run_wizard() -> Result<()> {
     // Step 4: Audio test
     let _audio_ok = test::test_audio(tts_provider.as_ref(), &voice_id).await?;
 
-    // Step 5: Save config
-    let mut cfg = Config::default();
-    cfg.provider = provider_config;
-    cfg.voice.default = voice_id;
+    // Step 5: Save config — build using struct-update syntax to avoid partial reassignment
+    let default = Config::default();
+    let cfg = Config {
+        provider: provider_config,
+        voice: VoiceConfig {
+            default: voice_id,
+            pool: default.voice.pool.clone(),
+        },
+        ..default
+    };
     config::save(&cfg)?;
 
     // Step 6: Summary + tip
@@ -66,12 +72,15 @@ fn print_summary(cfg: &Config) {
         cfg.provider.model.clone()
     };
     let voice_display = cfg.voice.default.clone();
+    let config_path_display = config::config_path()
+        .to_string_lossy()
+        .into_owned();
 
     println!("  ┌─────────────────────────────────────────────────┐");
     println!("  │  Provider:  {:<36}│", provider_display.green());
     println!("  │  Model:     {:<36}│", model_display.green());
     println!("  │  Voice:     {:<36}│", voice_display.green());
-    println!("  │  Config:    {:<36}│", "~/.config/loquitor/config.toml".dimmed());
+    println!("  │  Config:    {}", config_path_display.dimmed());
     println!("  └─────────────────────────────────────────────────┘");
     println!();
     println!("  Get started:");
