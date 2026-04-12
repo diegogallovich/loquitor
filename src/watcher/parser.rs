@@ -36,7 +36,7 @@ impl Parser {
             None => true, // No escape — default terminal color, narrative
             Some(pos) => {
                 let code = &before[pos + 2..]; // Skip \x1b[
-                // Extract the SGR code (everything up to 'm')
+                                               // Extract the SGR code (everything up to 'm')
                 if let Some(m_pos) = code.find('m') {
                     let sgr = &code[..m_pos];
                     // Default/reset: "0" or "0;0" or empty
@@ -93,7 +93,15 @@ impl Parser {
         }
         let speakable_chars = trimmed
             .chars()
-            .filter(|c| c.is_alphabetic() || *c == ' ' || *c == '\'' || *c == ',' || *c == '.' || *c == '!' || *c == '?')
+            .filter(|c| {
+                c.is_alphabetic()
+                    || *c == ' '
+                    || *c == '\''
+                    || *c == ','
+                    || *c == '.'
+                    || *c == '!'
+                    || *c == '?'
+            })
             .count() as f64;
 
         speakable_chars / total >= self.speakability_threshold

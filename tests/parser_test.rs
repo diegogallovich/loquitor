@@ -82,7 +82,7 @@ fn test_code_block_is_skipped() {
     assert_eq!(parser.parse_line("⏺ ```rust"), None); // opens
     assert_eq!(parser.parse_line("⏺ fn main() {}"), None); // inside
     assert_eq!(parser.parse_line("⏺ ```"), None); // closes
-    // Narrative after the block should be spoken again
+                                                  // Narrative after the block should be spoken again
     let result = parser.parse_line("⏺ The implementation is complete.");
     assert_eq!(result, Some("The implementation is complete.".into()));
 }
@@ -147,6 +147,9 @@ fn test_multiple_narrative_lines_in_sequence() {
     let line2 = parser.parse_line("⏺ The config file is missing the database URL.");
     let line3 = parser.parse_line("⏺ Let me fix that.");
     assert_eq!(line1, Some("I see the issue.".into()));
-    assert_eq!(line2, Some("The config file is missing the database URL.".into()));
+    assert_eq!(
+        line2,
+        Some("The config file is missing the database URL.".into())
+    );
     assert_eq!(line3, Some("Let me fix that.".into()));
 }

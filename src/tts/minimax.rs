@@ -35,8 +35,16 @@ const MINIMAX_VOICES: &[(&str, &str, &str)] = &[
     ("female-tianmei", "Tianmei", "female, sweet"),
     ("presenter_male", "Presenter Male", "presenter, male"),
     ("presenter_female", "Presenter Female", "presenter, female"),
-    ("audiobook_male_1", "Audiobook Male 1", "audiobook narrator, male"),
-    ("audiobook_female_1", "Audiobook Female 1", "audiobook narrator, female"),
+    (
+        "audiobook_male_1",
+        "Audiobook Male 1",
+        "audiobook narrator, male",
+    ),
+    (
+        "audiobook_female_1",
+        "Audiobook Female 1",
+        "audiobook narrator, female",
+    ),
 ];
 
 #[async_trait]
@@ -94,8 +102,7 @@ impl TtsProvider for MiniMaxProvider {
             .as_str()
             .context("MiniMax response missing data.audio field")?;
 
-        let audio_bytes = hex::decode(hex_audio)
-            .context("Failed to hex-decode MiniMax audio")?;
+        let audio_bytes = hex::decode(hex_audio).context("Failed to hex-decode MiniMax audio")?;
 
         Ok(AudioData {
             bytes: Bytes::from(audio_bytes),

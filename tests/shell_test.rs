@@ -1,4 +1,6 @@
-use loquitor::shell::{hook_content, insert_hook, is_hook_present, strip_hook, HOOK_END, HOOK_START};
+use loquitor::shell::{
+    hook_content, insert_hook, is_hook_present, strip_hook, HOOK_END, HOOK_START,
+};
 
 #[test]
 fn test_hook_content_contains_markers() {
@@ -70,7 +72,10 @@ fn test_insert_hook_is_idempotent() {
 
     // Should have exactly one HOOK_START
     let start_count = twice.matches(HOOK_START).count();
-    assert_eq!(start_count, 1, "Hook should appear exactly once after double install");
+    assert_eq!(
+        start_count, 1,
+        "Hook should appear exactly once after double install"
+    );
 }
 
 #[test]

@@ -5,10 +5,26 @@ use dialoguer::{theme::ColorfulTheme, Password, Select};
 
 pub fn select_provider() -> Result<ProviderConfig> {
     let providers = [
-        ("openai", "OpenAI TTS", "$15/M chars, simple setup, good quality"),
-        ("elevenlabs", "ElevenLabs", "Best voices, lowest latency, from $5/mo"),
-        ("minimax", "MiniMax", "$60/M chars, multilingual, expressive"),
-        ("macos_say", "macOS Say", "Free, offline, built-in (lower quality)"),
+        (
+            "openai",
+            "OpenAI TTS",
+            "$15/M chars, simple setup, good quality",
+        ),
+        (
+            "elevenlabs",
+            "ElevenLabs",
+            "Best voices, lowest latency, from $5/mo",
+        ),
+        (
+            "minimax",
+            "MiniMax",
+            "$60/M chars, multilingual, expressive",
+        ),
+        (
+            "macos_say",
+            "macOS Say",
+            "Free, offline, built-in (lower quality)",
+        ),
     ];
 
     let items: Vec<String> = providers

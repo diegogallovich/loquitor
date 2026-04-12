@@ -77,10 +77,7 @@ async fn cmd_enable() -> Result<()> {
     loquitor::daemon::write_pid_file(&pid_path)?;
     println!("{}", "✓ Daemon started.".green());
     println!("  Loquitor is now listening. Open a new terminal");
-    println!(
-        "  tab and run {} — I'll start talking.",
-        "claude".cyan()
-    );
+    println!("  tab and run {} — I'll start talking.", "claude".cyan());
 
     // Show tip on first enable
     if !cfg.ui.tip_shown {
@@ -90,10 +87,7 @@ async fn cmd_enable() -> Result<()> {
             "  ─────────────────────────────────────────────".dimmed()
         );
         println!("{}", "  Loquitor is free and open source.".dimmed());
-        println!(
-            "{}",
-            "  Tip the creator: loquitor.reachdiego.com".dimmed()
-        );
+        println!("{}", "  Tip the creator: loquitor.reachdiego.com".dimmed());
         let mut cfg_update = cfg.clone();
         cfg_update.ui.tip_shown = true;
         loquitor::config::save(&cfg_update)?;
@@ -114,10 +108,7 @@ fn cmd_disable() -> Result<()> {
 
     loquitor::daemon::stop_daemon(&pid_path)?;
     println!("{}", "✓ Daemon stopped.".green());
-    println!(
-        "  Restart your shell or run: {}",
-        "source ~/.zshrc".cyan()
-    );
+    println!("  Restart your shell or run: {}", "source ~/.zshrc".cyan());
 
     Ok(())
 }

@@ -1,6 +1,6 @@
+use bytes::Bytes;
 use loquitor::audio::{self, Utterance};
 use loquitor::tts::{AudioData, AudioFormat};
-use bytes::Bytes;
 use std::time::{Duration, Instant};
 
 #[tokio::test]

@@ -35,8 +35,7 @@ pub fn save(config: &Config) -> Result<()> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create config directory at {}", dir.display()))?;
-    let content = toml::to_string_pretty(config)
-        .context("Failed to serialize config to TOML")?;
+    let content = toml::to_string_pretty(config).context("Failed to serialize config to TOML")?;
     std::fs::write(&path, content)
         .with_context(|| format!("Failed to write config to {}", path.display()))?;
     Ok(())

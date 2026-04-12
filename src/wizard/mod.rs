@@ -2,7 +2,10 @@ pub mod provider;
 pub mod test;
 pub mod voice;
 
-use crate::config::{self, types::{Config, VoiceConfig}};
+use crate::config::{
+    self,
+    types::{Config, VoiceConfig},
+};
 use crate::tts;
 use anyhow::Result;
 use colored::Colorize;
@@ -72,9 +75,7 @@ fn print_summary(cfg: &Config) {
         cfg.provider.model.clone()
     };
     let voice_display = cfg.voice.default.clone();
-    let config_path_display = config::config_path()
-        .to_string_lossy()
-        .into_owned();
+    let config_path_display = config::config_path().to_string_lossy().into_owned();
 
     println!("  ┌─────────────────────────────────────────────────┐");
     println!("  │  Provider:  {:<36}│", provider_display.green());
@@ -85,13 +86,22 @@ fn print_summary(cfg: &Config) {
     println!();
     println!("  Get started:");
     println!("  {}", "$ loquitor enable".purple());
-    println!("{}", "  Then open a new terminal tab and run claude.".dimmed());
+    println!(
+        "{}",
+        "  Then open a new terminal tab and run claude.".dimmed()
+    );
 
     // Tip section
     println!();
-    println!("{}", "  ─────────────────────────────────────────────────".dimmed());
+    println!(
+        "{}",
+        "  ─────────────────────────────────────────────────".dimmed()
+    );
     println!("{}", "  Loquitor is free and open source.".dimmed());
-    println!("{}", "  If it saves you time, consider tipping the creator:".dimmed());
+    println!(
+        "{}",
+        "  If it saves you time, consider tipping the creator:".dimmed()
+    );
     println!();
     println!("{}", "  SOL/USDC/USDT: [address]".dimmed());
     println!("{}", "  ETH/USDC/USDT: [address]".dimmed());

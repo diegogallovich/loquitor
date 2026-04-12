@@ -49,7 +49,8 @@ impl AudioQueue {
 
             // Offload blocking playback to a blocking thread so we don't stall the tokio runtime.
             let audio_clone = utterance.audio.clone();
-            let result = tokio::task::spawn_blocking(move || player::play_audio(&audio_clone)).await;
+            let result =
+                tokio::task::spawn_blocking(move || player::play_audio(&audio_clone)).await;
 
             match result {
                 Ok(Ok(())) => {}

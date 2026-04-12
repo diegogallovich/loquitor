@@ -14,11 +14,7 @@ pub struct DirectoryWatcher {
 }
 
 impl DirectoryWatcher {
-    pub fn new(
-        lanes_dir: PathBuf,
-        config: Config,
-        lane_tx: mpsc::Sender<LaneMessage>,
-    ) -> Self {
+    pub fn new(lanes_dir: PathBuf, config: Config, lane_tx: mpsc::Sender<LaneMessage>) -> Self {
         Self {
             lanes_dir,
             config,

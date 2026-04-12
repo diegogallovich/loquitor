@@ -88,7 +88,10 @@ impl TtsProvider for ElevenLabsProvider {
             anyhow::bail!("ElevenLabs TTS error ({status}): {error_body}");
         }
 
-        let bytes = response.bytes().await.context("Failed to read ElevenLabs TTS response")?;
+        let bytes = response
+            .bytes()
+            .await
+            .context("Failed to read ElevenLabs TTS response")?;
 
         Ok(AudioData {
             bytes,
