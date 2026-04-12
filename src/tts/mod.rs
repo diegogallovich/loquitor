@@ -1,4 +1,6 @@
+pub mod elevenlabs;
 pub mod macos;
+pub mod minimax;
 pub mod openai;
 
 use anyhow::Result;
@@ -55,6 +57,8 @@ pub fn create_provider(
 ) -> Result<Box<dyn TtsProvider>> {
     match provider_name {
         "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model))),
+        "elevenlabs" => Ok(Box::new(elevenlabs::ElevenLabsProvider::new(api_key))),
+        "minimax" => Ok(Box::new(minimax::MiniMaxProvider::new(api_key, model))),
         "macos_say" => Ok(Box::new(macos::MacOsSayProvider)),
         other => anyhow::bail!("Unknown TTS provider: {other}"),
     }
