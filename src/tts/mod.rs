@@ -1,4 +1,5 @@
 pub mod macos;
+pub mod openai;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -49,10 +50,11 @@ pub trait TtsProvider: Send + Sync {
 
 pub fn create_provider(
     provider_name: &str,
-    _api_key: &str,
-    _model: &str,
+    api_key: &str,
+    model: &str,
 ) -> Result<Box<dyn TtsProvider>> {
     match provider_name {
+        "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model))),
         "macos_say" => Ok(Box::new(macos::MacOsSayProvider)),
         other => anyhow::bail!("Unknown TTS provider: {other}"),
     }
