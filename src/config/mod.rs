@@ -4,9 +4,21 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use types::Config;
 
+/// Return the config directory for Loquitor.
+///
+/// Prefers XDG conventions over platform-native paths because CLI tools
+/// almost universally expect `~/.config/<tool>/` on every platform, while
+/// `dirs::config_dir()` returns `~/Library/Application Support/` on macOS.
+/// Respects `$XDG_CONFIG_HOME` when set.
 pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return PathBuf::from(xdg).join("loquitor");
+        }
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
         .join("loquitor")
 }
 
