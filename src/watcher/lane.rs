@@ -88,9 +88,17 @@ impl LaneWatcher {
                         read_any = true;
                         leftover.extend_from_slice(&read_chunk[..n]);
 
-                        // Split on LF, process complete lines, keep the trailing partial
-                        // fragment (if any) in leftover for the next iteration.
-                        while let Some(nl) = leftover.iter().position(|&b| b == b'\n') {
+                        // Split on LF or CR (either line separator). TUIs like
+                        // Claude Code use bare \r (carriage return) to redraw a line
+                        // in-place — if we only split on \n we'd concatenate the
+                        // redrawn chunks (narrative + status + prompt + box drawing)
+                        // into one mega-line that poisons the speakability filter.
+                        // Treating \r as a line break on its own splits each redraw
+                        // frame into its own logical line.
+                        while let Some(nl) = leftover
+                            .iter()
+                            .position(|&b| b == b'\n' || b == b'\r')
+                        {
                             let line_bytes: Vec<u8> = leftover.drain(..=nl).collect();
                             // Lossy UTF-8 conversion so control-sequence bytes from `script`
                             // captures don't kill the watcher — invalid sequences become U+FFFD
