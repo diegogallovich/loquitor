@@ -1,0 +1,17 @@
+.button {
+  color: var(--term-dim);
+  font-size: 10px;
+  font-family: inherit;
+  background: none;
+  border: 1px solid var(--term-dim);
+  border-radius: 3px;
+  padding: 1px 6px;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.button:hover {
+  color: var(--term-green);
+  border-color: var(--term-green);
+}
