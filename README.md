@@ -70,9 +70,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Tip the Creator
 
-Loquitor is free and open source. If it saves you time, consider tipping:
+Loquitor is free and open source. If it saves you time, consider tipping.
 
-- SOL/USDC/USDT (Solana): `[address]`
-- ETH/USDC/USDT (Ethereum): `[address]`
-- BTC: `[address]`
-- TON: `[address]`
+Easiest path: message me on Telegram at [**@diegogallovich**](https://t.me/diegogallovich) — we can settle up in whatever currency works for both of us.
+
+On-chain addresses (each chain has one wallet that accepts the native token plus supported stables):
+
+| Chain | Address | Accepts |
+|---|---|---|
+| Ethereum | `0xeA284b3EAd48388174d7A67c63DC1a3107FbEA16` | ETH, USDC, USDT |
+| Solana | `BjykpVzwfBYqwN6oNieCKdTux7Derm9n1dqJtGoHSeQv` | SOL, USDC, USDT |
+| TON | `UQA6_sZRQkkHspUssT7ruDwhDba3GuGR5qxVPtk2rDZlrLnc` | TON, USDT |
+| Tron | `TWLftLqDRHJNXNv3UGF5vTALE2iXxhkyvF` | TRX, USDT |
+| Bitcoin | `bc1qrsnavtmh97rqvvgusva3c0ytkrvammuhccxpdv` | BTC |

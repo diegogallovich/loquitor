@@ -103,9 +103,28 @@ fn print_summary(cfg: &Config) {
         "  If it saves you time, consider tipping the creator:".dimmed()
     );
     println!();
-    println!("{}", "  SOL/USDC/USDT: [address]".dimmed());
-    println!("{}", "  ETH/USDC/USDT: [address]".dimmed());
-    println!("{}", "  BTC:           [address]".dimmed());
-    println!("{}", "  TON:           [address]".dimmed());
+    println!("{}", "  Telegram (direct):  @diegogallovich".dimmed());
+    println!("{}", "  Ethereum (ETH/USDC/USDT):".dimmed());
+    println!(
+        "{}",
+        "    0xeA284b3EAd48388174d7A67c63DC1a3107FbEA16".dimmed()
+    );
+    println!("{}", "  Solana (SOL/USDC/USDT):".dimmed());
+    println!(
+        "{}",
+        "    BjykpVzwfBYqwN6oNieCKdTux7Derm9n1dqJtGoHSeQv".dimmed()
+    );
+    println!("{}", "  TON (TON/USDT):".dimmed());
+    println!(
+        "{}",
+        "    UQA6_sZRQkkHspUssT7ruDwhDba3GuGR5qxVPtk2rDZlrLnc".dimmed()
+    );
+    println!("{}", "  Tron (TRX/USDT):".dimmed());
+    println!("{}", "    TWLftLqDRHJNXNv3UGF5vTALE2iXxhkyvF".dimmed());
+    println!("{}", "  Bitcoin:".dimmed());
+    println!(
+        "{}",
+        "    bc1qrsnavtmh97rqvvgusva3c0ytkrvammuhccxpdv".dimmed()
+    );
     println!();
 }
