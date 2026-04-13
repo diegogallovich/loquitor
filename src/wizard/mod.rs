@@ -30,13 +30,15 @@ pub async fn run_wizard() -> Result<()> {
     // Step 4: Audio test
     let _audio_ok = test::test_audio(tts_provider.as_ref(), &voice_id).await?;
 
-    // Step 5: Save config — build using struct-update syntax to avoid partial reassignment
+    // Step 5: Save config — pool seeded with just the chosen voice so it stays
+    // provider-consistent. The user can add more voices by editing config.toml,
+    // or we'll add a `loquitor voices add` command later.
     let default = Config::default();
     let cfg = Config {
         provider: provider_config,
         voice: VoiceConfig {
-            default: voice_id,
-            pool: default.voice.pool.clone(),
+            default: voice_id.clone(),
+            pool: vec![voice_id],
         },
         ..default
     };
