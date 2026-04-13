@@ -1,22 +1,49 @@
 :root {
-  color-scheme: dark;
+  /* Terminal colors */
+  --term-bg: #1c1c1e;
+  --term-text: #e0e0e0;
+  --term-text-dim: #c0c0c0;
+  --term-muted: #888;
+  --term-green: #73c991;
+  --term-blue: #6cb6ff;
+  --term-white: #fff;
+  --term-dim: #555;
+  --term-titlebar-start: #3a3a3a;
+  --term-titlebar-end: #2d2d2d;
+  --term-dot-red: #ff5f57;
+  --term-dot-yellow: #febc2e;
+  --term-dot-green: #28c840;
+
+  /* Page background */
+  --page-bg: #0d0d0d;
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
 }
 
-html,
-body {
-  min-height: 100%;
+html {
+  color-scheme: dark;
 }
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--page-bg);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--term-text);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--term-blue);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }

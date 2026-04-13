@@ -1,0 +1,79 @@
+.wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+.terminal {
+  width: 100%;
+  max-width: 720px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border: 1px solid #3a3a3a;
+}
+
+.titleBar {
+  background: linear-gradient(
+    var(--term-titlebar-start),
+    var(--term-titlebar-end)
+  );
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.dots {
+  display: flex;
+  gap: 6px;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.dotRed {
+  background: var(--term-dot-red);
+}
+
+.dotYellow {
+  background: var(--term-dot-yellow);
+}
+
+.dotGreen {
+  background: var(--term-dot-green);
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.content {
+  background: var(--term-bg);
+  padding: 16px 20px;
+}
+
+@media (max-width: 480px) {
+  .wrapper {
+    padding: 16px 8px;
+  }
+
+  .terminal {
+    border-radius: 8px;
+  }
+
+  .content {
+    padding: 12px 14px;
+    font-size: 12px;
+  }
+}
