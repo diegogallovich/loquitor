@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader, SeekFrom};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -72,24 +72,39 @@ impl LaneWatcher {
         let poll_interval = Duration::from_millis(100);
         let mut coalesce_buf: Vec<String> = Vec::new();
         let mut last_content_time: Option<tokio::time::Instant> = None;
+        // Leftover bytes that are either pre-newline or a partial UTF-8 character at
+        // the end of the last read. Carry them across reads so we don't split a line
+        // or a multi-byte grapheme on an arbitrary buffer boundary.
+        let mut leftover: Vec<u8> = Vec::new();
+        let mut read_chunk = vec![0u8; 8192];
 
         loop {
-            // Read any available lines
+            // Read any available bytes
             let mut read_any = false;
             loop {
-                let mut line = String::new();
-                match reader.read_line(&mut line).await {
+                match reader.read(&mut read_chunk).await {
                     Ok(0) => break, // No new data
-                    Ok(_) => {
+                    Ok(n) => {
                         read_any = true;
-                        if let Some(text) = self.parser.parse_line(&line) {
-                            coalesce_buf.push(text);
-                            last_content_time = Some(tokio::time::Instant::now());
-                            debug!(
-                                lane = %self.lane_id,
-                                buffered = coalesce_buf.len(),
-                                "Added to coalesce buffer"
-                            );
+                        leftover.extend_from_slice(&read_chunk[..n]);
+
+                        // Split on LF, process complete lines, keep the trailing partial
+                        // fragment (if any) in leftover for the next iteration.
+                        while let Some(nl) = leftover.iter().position(|&b| b == b'\n') {
+                            let line_bytes: Vec<u8> = leftover.drain(..=nl).collect();
+                            // Lossy UTF-8 conversion so control-sequence bytes from `script`
+                            // captures don't kill the watcher — invalid sequences become U+FFFD
+                            // which the speakability filter drops cleanly.
+                            let line = String::from_utf8_lossy(&line_bytes);
+                            if let Some(text) = self.parser.parse_line(&line) {
+                                coalesce_buf.push(text);
+                                last_content_time = Some(tokio::time::Instant::now());
+                                debug!(
+                                    lane = %self.lane_id,
+                                    buffered = coalesce_buf.len(),
+                                    "Added to coalesce buffer"
+                                );
+                            }
                         }
                     }
                     Err(e) => {
