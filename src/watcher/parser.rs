@@ -21,41 +21,124 @@ impl Parser {
     /// Stage 1: Check if a raw line (with ANSI codes still present) has a black/default ⏺.
     /// Returns true if the ⏺ character appears with no color escape or with reset/black/bold-default.
     /// Returns false for any other color (tool calls, file ops, etc.).
+    ///
+    /// Handles:
+    /// - No escape before marker -> narrative
+    /// - Basic 8-color black (30), reset (0), default (39), bold (1)
+    /// - 24-bit truecolor black `38;2;R;G;B` where R+G+B is near zero
+    /// - 256-color black `38;5;0` or `38;5;16`
     pub fn is_narrative_marker(raw_line: &str) -> bool {
-        // Line must contain the ⏺ character (U+23FA) to be a candidate
         let marker_pos = match raw_line.find('⏺') {
             Some(p) => p,
             None => return false,
         };
 
-        // Find the last ANSI escape sequence BEFORE the marker
         let before = &raw_line[..marker_pos];
         let last_escape = before.rfind("\x1b[");
 
         match last_escape {
-            None => true, // No escape — default terminal color, narrative
+            None => true,
             Some(pos) => {
-                let code = &before[pos + 2..]; // Skip \x1b[
-                                               // Extract the SGR code (everything up to 'm')
+                let code = &before[pos + 2..];
                 if let Some(m_pos) = code.find('m') {
-                    let sgr = &code[..m_pos];
-                    // Default/reset: "0" or "0;0" or empty
-                    // Black foreground: "30"
-                    // Bold (often preserves default color): "1"
-                    // Bold + default: "0;1", "1;0"
-                    // Bold + black: "1;30"
-                    matches!(sgr, "0" | "0;0" | "" | "30" | "1" | "1;30" | "0;1" | "1;0")
+                    Self::sgr_is_narrative_foreground(&code[..m_pos])
                 } else {
-                    true // Malformed escape — treat as narrative (defensive)
+                    true // Malformed; defensive
                 }
             }
         }
     }
 
-    /// Stage 2: Strip all ANSI escape sequences from a line.
+    /// Decide if an SGR parameter string (e.g. "38;2;0;0;0" or "1;30") sets the
+    /// foreground to black/default/bold (= narrative) or to a real color (= tool noise).
+    fn sgr_is_narrative_foreground(sgr: &str) -> bool {
+        if sgr.is_empty() {
+            return true;
+        }
+        let params: Vec<&str> = sgr.split(';').collect();
+        let mut i = 0;
+        while i < params.len() {
+            match params[i] {
+                // Attribute-only or reset-to-default — color-neutral
+                "0" | "1" | "2" | "3" | "4" | "5" | "7" | "8" | "9" | "22" | "23" | "24"
+                | "25" | "27" | "28" | "29" | "39" | "49" => i += 1,
+                // Basic foreground black
+                "30" => i += 1,
+                // 24-bit truecolor foreground: "38;2;R;G;B"
+                "38" if i + 4 < params.len() && params[i + 1] == "2" => {
+                    let r: u16 = params[i + 2].parse().unwrap_or(255);
+                    let g: u16 = params[i + 3].parse().unwrap_or(255);
+                    let b: u16 = params[i + 4].parse().unwrap_or(255);
+                    // Narrative only if the emitted color is near black. Claude Code uses
+                    // (0,0,0) for narrative and bright/warm RGB for tool calls, so a tight
+                    // threshold reliably separates them.
+                    if r + g + b > 30 {
+                        return false;
+                    }
+                    i += 5;
+                }
+                // 256-color foreground: "38;5;N"
+                "38" if i + 2 < params.len() && params[i + 1] == "5" => {
+                    let n: u16 = params[i + 2].parse().unwrap_or(255);
+                    // 0 and 16 are the "black" slots in the 256-color palette
+                    if n != 0 && n != 16 {
+                        return false;
+                    }
+                    i += 3;
+                }
+                // Any other chromatic foreground => colored line => not narrative
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// Stage 2: Strip all ANSI escape sequences from a line. First converts
+    /// cursor-forward sequences (`\x1b[NC`) to N spaces so TUI-rendered text
+    /// (which uses cursor positioning instead of literal spaces) is readable
+    /// after stripping.
     pub fn strip_ansi(line: &str) -> String {
-        let bytes = strip_ansi_escapes::strip(line);
+        let preprocessed = Self::expand_cursor_forward(line);
+        let bytes = strip_ansi_escapes::strip(&preprocessed);
         String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    /// Replace `\x1b[NC` (cursor forward N columns) with N literal spaces.
+    /// Claude Code and similar TUIs use this pattern to position text without
+    /// emitting space characters; when we strip ANSI we'd otherwise get words
+    /// glued together. Works on bytes so UTF-8 sequences pass through intact.
+    fn expand_cursor_forward(line: &str) -> String {
+        let bytes = line.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            // Look for ESC [ <digits> C — cursor forward by N columns
+            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+                let digit_start = i + 2;
+                let mut j = digit_start;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j > digit_start && j < bytes.len() && bytes[j] == b'C' {
+                    let n: usize = std::str::from_utf8(&bytes[digit_start..j])
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    // Cap expansion to avoid pathological input blowing memory.
+                    // Claude Code uses small N (typically 1-3).
+                    let n = n.min(256);
+                    out.extend(std::iter::repeat_n(b' ', n));
+                    i = j + 1;
+                    continue;
+                }
+            }
+            // Not a cursor-forward sequence; copy the byte through unchanged.
+            // Multi-byte UTF-8 sequences pass intact because we don't interpret
+            // them — we only recognize the ESC [ <digits> C pattern.
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
     }
 
     /// Stage 4: Determine if a cleaned line is "speakable" natural language

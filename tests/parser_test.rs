@@ -7,6 +7,39 @@ fn make_parser() -> Parser {
     )
 }
 
+// Regression test for a real Claude Code TUI line captured from `script`.
+// Claude Code uses 24-bit truecolor SGR ("38;2;0;0;0" = RGB black) for narrative
+// markers and `[1C` (cursor forward 1) instead of literal spaces between words.
+#[test]
+fn test_claude_code_truecolor_narrative_line() {
+    let mut parser = make_parser();
+    let raw = "\x1b[?2026l\x1b[?2026h\x1b[6A\x1b[38;2;0;0;0m⏺\x1b[1C\x1b[39mCongrats\x1b[1C—\x1b[1Cthat's\x1b[1Ca\x1b[1Creal\x1b[1Cmilestone.";
+    let result = parser.parse_line(raw);
+    assert_eq!(
+        result,
+        Some("Congrats — that's a real milestone.".into()),
+        "Should recognize RGB-black ⏺ as narrative and expand [1C into spaces",
+    );
+}
+
+#[test]
+fn test_truecolor_non_black_is_skipped() {
+    let mut parser = make_parser();
+    // RGB(245, 149, 117) — an orange tool-call color Claude Code uses
+    let raw = "\x1b[38;2;245;149;117m⏺\x1b[39m Bash(echo hi)";
+    assert_eq!(parser.parse_line(raw), None);
+}
+
+#[test]
+fn test_256_color_black_is_narrative() {
+    let mut parser = make_parser();
+    let raw = "\x1b[38;5;0m⏺ The build succeeded.";
+    assert_eq!(
+        parser.parse_line(raw),
+        Some("The build succeeded.".into())
+    );
+}
+
 #[test]
 fn test_narrative_line_is_spoken() {
     let mut parser = make_parser();
