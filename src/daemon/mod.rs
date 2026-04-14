@@ -1,4 +1,5 @@
 pub mod ipc;
+pub mod liaison_worker;
 pub mod pipeline;
 
 use anyhow::{Context, Result};
