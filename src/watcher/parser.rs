@@ -224,9 +224,9 @@ impl Parser {
     /// Inputs describe the current raw line:
     ///   - `has_tool_marker`   — raw line has a coloured ⏺ (tool call starting)
     ///   - `is_tool_call_text` — cleaned text matches `Bash(...)`, `Read(...)` etc.
-    ///                           (tool call that somehow lacks a marker; belt-and-suspenders)
+    ///     (tool call that somehow lacks a marker; belt-and-suspenders)
     ///   - `is_speakable`      — cleaned text passed the speakability filter
-    ///                           (letters/punctuation ratio, not a code fence, not a path)
+    ///     (letters/punctuation ratio, not a code fence, not a path)
     ///   - `is_empty`          — cleaned text is empty after trimming
     ///
     /// Trade-offs:

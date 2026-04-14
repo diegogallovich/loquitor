@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod config;
 pub mod daemon;
+pub mod liaison;
 pub mod shell;
 pub mod tts;
 pub mod watcher;
