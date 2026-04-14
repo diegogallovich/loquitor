@@ -6,7 +6,7 @@
 //! Diego already uses MiniMax for TTS, so letting users point the
 //! liaison at the same account removes one API-key setup step.
 
-use super::openai::OpenAiProvider;
+use super::openai::{OpenAiProvider, TOKEN_CAP_LEGACY};
 use super::{LiaisonProvider, TurnContext, TurnSummary};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -25,8 +25,17 @@ impl MiniMaxProvider {
         } else {
             model
         };
+        // MiniMax's chatcompletion_v2 still expects the legacy
+        // `max_tokens` parameter; passing `max_completion_tokens`
+        // would be ignored or rejected.
         Self {
-            inner: OpenAiProvider::with_endpoint(api_key, model, ENDPOINT, "minimax"),
+            inner: OpenAiProvider::with_endpoint(
+                api_key,
+                model,
+                ENDPOINT,
+                "minimax",
+                TOKEN_CAP_LEGACY,
+            ),
         }
     }
 }

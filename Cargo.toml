@@ -1,6 +1,6 @@
 [package]
 name = "loquitor"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Diego Gallovich"]
 description = "Let your agents think out loud — TTS watcher for AI coding agents"
