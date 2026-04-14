@@ -12,8 +12,14 @@ jobs:
     strategy:
       matrix:
         include:
+          # GitHub retired the macos-13 (Intel) runner. Build the x86_64
+          # Mac binary by cross-compiling from the arm64 runner — the
+          # Rust toolchain handles the target switch via `targets:` on
+          # dtolnay/rust-toolchain@stable, and `loquitor`'s audio deps
+          # (rodio + symphonia) link against system frameworks that
+          # exist on both architectures.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
