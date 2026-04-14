@@ -42,6 +42,26 @@ pub fn load() -> Result<Config> {
     Ok(config)
 }
 
+/// Peek at the config file without deserialising — returns `true` if it
+/// looks like a pre-v0.2.0 config (has a top-level `[provider]` block
+/// instead of `[tts]`/`[liaison]`). Used by `loquitor init` to decide
+/// whether to offer a fresh-wizard run-through.
+pub fn is_legacy_format() -> bool {
+    let path = config_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    // A legacy config has `[provider]` as a top-level table but lacks the
+    // new `[tts]` or `[liaison]` tables. We check for the exact line rather
+    // than a substring match so a comment mentioning `[provider]` doesn't
+    // give a false positive.
+    let has_legacy_provider = content
+        .lines()
+        .any(|line| line.trim() == "[provider]");
+    let has_new_tts = content.lines().any(|line| line.trim() == "[tts]");
+    has_legacy_provider && !has_new_tts
+}
+
 pub fn save(config: &Config) -> Result<()> {
     let path = config_path();
     let dir = config_dir();

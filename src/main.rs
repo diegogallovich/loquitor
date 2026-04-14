@@ -39,13 +39,20 @@ enum Cli {
 #[derive(Subcommand)]
 enum ConfigureTarget {
     /// Switch TTS provider, update API key, pick a new voice, and test
-    Provider,
-    /// Pick a different voice from the current provider
+    Tts,
+    /// Switch the liaison LLM (the layer that summarises each Claude turn
+    /// before it's spoken). Prompts for provider, API key, and model.
+    Liaison,
+    /// Pick a different voice from the current TTS provider
     Voice,
     /// Choose whether every lane shares one voice or each lane gets its own
     LanePolicy,
-    /// Walk through provider + voice + lane-policy in sequence
+    /// Walk through TTS + liaison + voice + lane-policy in sequence
     All,
+    /// Deprecated alias for `tts` — kept for one release to catch muscle
+    /// memory from v0.1.x. Prints a notice and delegates to `tts`.
+    #[command(hide = true)]
+    Provider,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -80,10 +87,19 @@ async fn cmd_init() -> Result<()> {
 
 async fn cmd_configure(target: ConfigureTarget) -> Result<()> {
     match target {
-        ConfigureTarget::Provider => loquitor::wizard::configure_provider().await,
+        ConfigureTarget::Tts => loquitor::wizard::configure_tts().await,
+        ConfigureTarget::Liaison => loquitor::wizard::configure_liaison().await,
         ConfigureTarget::Voice => loquitor::wizard::configure_voice().await,
         ConfigureTarget::LanePolicy => loquitor::wizard::configure_lane_policy().await,
         ConfigureTarget::All => loquitor::wizard::configure_all().await,
+        ConfigureTarget::Provider => {
+            println!(
+                "{}",
+                "note: `configure provider` is deprecated — use `configure tts`."
+                    .yellow()
+            );
+            loquitor::wizard::configure_tts().await
+        }
     }
 }
 
@@ -163,7 +179,7 @@ fn cmd_status() -> Result<()> {
             "not installed".red()
         }
     );
-    println!("  Provider: {}", cfg.provider.name.cyan());
+    println!("  Provider: {}", cfg.tts.name.cyan());
     Ok(())
 }
 
@@ -195,9 +211,9 @@ fn cmd_lane(id: String, name: Option<String>, voice: Option<String>) -> Result<(
 async fn cmd_voices() -> Result<()> {
     let cfg = loquitor::config::load()?;
     let provider = loquitor::tts::create_provider(
-        &cfg.provider.name,
-        &cfg.provider.api_key,
-        &cfg.provider.model,
+        &cfg.tts.name,
+        &cfg.tts.api_key,
+        &cfg.tts.model,
     )?;
     let voices = provider.list_voices().await?;
     if voices.is_empty() {
@@ -213,9 +229,9 @@ async fn cmd_voices() -> Result<()> {
 async fn cmd_test(text: String) -> Result<()> {
     let cfg = loquitor::config::load()?;
     let provider = loquitor::tts::create_provider(
-        &cfg.provider.name,
-        &cfg.provider.api_key,
-        &cfg.provider.model,
+        &cfg.tts.name,
+        &cfg.tts.api_key,
+        &cfg.tts.model,
     )?;
 
     println!("  Speaking: \"{text}\"");

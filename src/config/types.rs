@@ -3,7 +3,14 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub provider: ProviderConfig,
+    /// Text-to-speech provider — the voice layer that speaks the final
+    /// summary notification.
+    pub tts: TtsConfig,
+    /// Liaison LLM — the layer that reads the turn buffer and produces
+    /// the short sentence to be spoken. Configured separately because
+    /// users routinely pair a cheap LLM (Haiku) with a premium TTS voice
+    /// (ElevenLabs) or vice versa.
+    pub liaison: LiaisonConfig,
     pub voice: VoiceConfig,
     pub lanes: LanesConfig,
     pub queue: QueueConfig,
@@ -13,10 +20,39 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
+pub struct TtsConfig {
     pub name: String,
     pub api_key: String,
     pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiaisonConfig {
+    /// Provider id: `anthropic`, `openai`, `google`, `minimax`, `openai_compat`.
+    pub name: String,
+    pub api_key: String,
+    pub model: String,
+    /// Only meaningful for `openai_compat` — the base URL of the
+    /// OpenAI-compatible endpoint (xAI, Groq, Mistral, DeepSeek, Ollama,
+    /// self-hosted, etc.). Ignored by native providers.
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default = "default_max_output_tokens")]
+    pub max_output_tokens: u32,
+    #[serde(default = "default_liaison_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Run the regex secret scrubber before shipping the turn buffer.
+    /// Forced on for every non-local provider regardless of this setting
+    /// — the flag is only read when resolving local endpoints.
+    #[serde(default = "default_true")]
+    pub scrub_secrets: bool,
+}
+
+fn default_max_output_tokens() -> u32 {
+    120
+}
+fn default_liaison_timeout_secs() -> u64 {
+    15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,9 +94,11 @@ pub struct QueueConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsingConfig {
-    pub debounce_ms: u64,
-    pub speakability_threshold: f64,
-    pub tool_pattern: String,
+    /// Preserve ANSI colour codes when feeding lines into the idle detector.
+    /// The detector uses box-drawing-only content to signal idle, so colour
+    /// matters only if the user customises the detection heuristic.
+    #[serde(default = "default_true")]
+    pub preserve_ansi_color_for_idle: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,23 +106,36 @@ pub struct DaemonConfig {
     pub socket_path: String,
     pub pid_file: String,
     pub log_level: String,
-    /// Speak `lane_intro_template` before any utterance whose lane differs from
-    /// the previous one played. Keeps the listener oriented when concurrent
-    /// Claude sessions interleave in the same audio queue.
-    #[serde(default = "default_true")]
-    pub announce_lane_on_switch: bool,
-    /// Template for the lane-switch announcement. `{name}` is replaced with the
-    /// lane's friendly name (from `lanes.rules`) or its ID (cwd basename).
-    #[serde(default = "default_intro_template")]
-    pub lane_intro_template: String,
+    /// Number of identical consecutive prompt frames required to confirm
+    /// that Claude is idle. Lower = faster notifications but more misfires
+    /// on brief mid-turn prompt flashes.
+    #[serde(default = "default_idle_confirm_frames")]
+    pub idle_confirm_frames: u32,
+    /// Minimum ms of quiet (no non-prompt output) between the first
+    /// detected prompt frame and the idle emission.
+    #[serde(default = "default_idle_min_silence_ms")]
+    pub idle_min_silence_ms: u64,
+    /// Upper bound on per-lane turn buffer size. When exceeded, the buffer
+    /// front-truncates and the turn is marked `truncated`.
+    #[serde(default = "default_turn_buffer_max_bytes")]
+    pub turn_buffer_max_bytes: usize,
+    /// Hard ceiling on how long a single turn can collect before being
+    /// force-shipped (e.g. Claude hung). Default 30 min.
+    #[serde(default = "default_turn_max_duration_secs")]
+    pub turn_max_duration_secs: u64,
 }
 
-fn default_true() -> bool {
-    true
+fn default_idle_confirm_frames() -> u32 {
+    3
 }
-
-fn default_intro_template() -> String {
-    "Regarding {name}.".into()
+fn default_idle_min_silence_ms() -> u64 {
+    500
+}
+fn default_turn_buffer_max_bytes() -> usize {
+    262144
+}
+fn default_turn_max_duration_secs() -> u64 {
+    1800
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,13 +143,26 @@ pub struct UiConfig {
     pub tip_shown: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            provider: ProviderConfig {
+            tts: TtsConfig {
                 name: "macos_say".into(),
                 api_key: String::new(),
                 model: String::new(),
+            },
+            liaison: LiaisonConfig {
+                name: "anthropic".into(),
+                api_key: String::new(),
+                model: "claude-haiku-4-5".into(),
+                base_url: String::new(),
+                max_output_tokens: default_max_output_tokens(),
+                timeout_secs: default_liaison_timeout_secs(),
+                scrub_secrets: true,
             },
             voice: VoiceConfig {
                 default: "Samantha".into(),
@@ -113,16 +177,16 @@ impl Default for Config {
                 coalesce_window_ms: 2000,
             },
             parsing: ParsingConfig {
-                debounce_ms: 500,
-                speakability_threshold: 0.6,
-                tool_pattern: r"^(Bash|Read|Edit|Write|Glob|Grep|Agent|Skill|TaskCreate|TaskUpdate|ToolSearch|WebFetch|WebSearch|NotebookEdit)\s*\(".into(),
+                preserve_ansi_color_for_idle: true,
             },
             daemon: DaemonConfig {
                 socket_path: "/tmp/loquitor.sock".into(),
                 pid_file: "/tmp/loquitor.pid".into(),
                 log_level: "info".into(),
-                announce_lane_on_switch: true,
-                lane_intro_template: "Regarding {name}.".into(),
+                idle_confirm_frames: default_idle_confirm_frames(),
+                idle_min_silence_ms: default_idle_min_silence_ms(),
+                turn_buffer_max_bytes: default_turn_buffer_max_bytes(),
+                turn_max_duration_secs: default_turn_max_duration_secs(),
             },
             ui: UiConfig { tip_shown: false },
         }

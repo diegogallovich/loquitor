@@ -1,4 +1,4 @@
-use crate::config::types::ProviderConfig;
+use crate::config::types::TtsConfig;
 use anyhow::Result;
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Password, Select};
@@ -32,7 +32,7 @@ const PROVIDERS: &[(&str, &str, &str)] = &[
 /// If the user re-selects the same provider and already has a non-empty API key,
 /// they're offered "keep existing key / enter new key" rather than being forced
 /// to retype it — useful for `loquitor configure` flows.
-pub fn select_provider(current: Option<&ProviderConfig>) -> Result<ProviderConfig> {
+pub fn select_provider(current: Option<&TtsConfig>) -> Result<TtsConfig> {
     let items: Vec<String> = PROVIDERS
         .iter()
         .map(|(_, name, desc)| format!("{name} — {desc}"))
@@ -75,7 +75,7 @@ pub fn select_provider(current: Option<&ProviderConfig>) -> Result<ProviderConfi
         (String::new(), String::new())
     };
 
-    Ok(ProviderConfig {
+    Ok(TtsConfig {
         name: id,
         api_key,
         model,
@@ -114,7 +114,7 @@ fn prompt_new_key(provider_id: &str) -> Result<String> {
 
 /// Offered when the picked provider matches the current one and a key is
 /// already on file — saves the user from retyping a known-good key.
-fn prompt_key_reuse(provider_id: &str, current: &ProviderConfig) -> Result<String> {
+fn prompt_key_reuse(provider_id: &str, current: &TtsConfig) -> Result<String> {
     println!();
     println!(
         "  {} {}",

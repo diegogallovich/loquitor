@@ -1,3 +1,4 @@
+pub mod liaison;
 pub mod policy;
 pub mod provider;
 pub mod test;
@@ -15,28 +16,34 @@ pub async fn run_wizard() -> Result<()> {
     // Step 1: Banner
     print_banner();
 
-    // Step 2: Provider selection (+ API key if cloud provider)
-    let provider_config = provider::select_provider(None)?;
+    // Step 2: TTS provider selection (+ API key if cloud provider)
+    let tts_config = provider::select_provider(None)?;
 
-    // Create provider instance for voice listing and testing
+    // Step 3: Liaison (summary LLM) provider selection
+    let liaison_config = liaison::select_liaison(None)?;
+
+    // Instantiate the TTS provider so we can list voices and run the audio test.
+    // The liaison provider isn't instantiated here — it'll be exercised end-to-end
+    // at the demo step (PR6 turns this into a real synthetic-turn demo).
     let tts_provider = tts::create_provider(
-        &provider_config.name,
-        &provider_config.api_key,
-        &provider_config.model,
+        &tts_config.name,
+        &tts_config.api_key,
+        &tts_config.model,
     )?;
 
-    // Step 3: Voice selection
+    // Step 4: Voice selection
     let voice_id = voice::select_voice(tts_provider.as_ref(), None).await?;
 
-    // Step 4: Audio test
+    // Step 5: Audio test
     let _audio_ok = test::test_audio(tts_provider.as_ref(), &voice_id).await?;
 
-    // Step 5: Save config — pool seeded with just the chosen voice so it stays
+    // Step 6: Save config — pool seeded with just the chosen voice so it stays
     // provider-consistent. The user can add more voices by editing config.toml,
     // or we'll add a `loquitor voices add` command later.
     let default = Config::default();
     let cfg = Config {
-        provider: provider_config,
+        tts: tts_config,
+        liaison: liaison_config,
         voice: VoiceConfig {
             default: voice_id.clone(),
             pool: vec![voice_id],
@@ -46,28 +53,28 @@ pub async fn run_wizard() -> Result<()> {
     };
     config::save(&cfg)?;
 
-    // Step 6: Summary + tip
+    // Step 7: Summary + tip
     print_summary(&cfg);
 
     Ok(())
 }
 
-/// Re-pick the provider (and re-enter/keep the API key), then re-pick a voice
-/// from the new provider's catalog. Other config sections are preserved.
+/// Re-pick the TTS provider (and re-enter/keep the API key), then re-pick a
+/// voice from the new provider's catalog. Other config sections are preserved.
 ///
 /// Because switching providers invalidates any pool of voice IDs from the old
 /// provider, the pool is reset to just the newly-chosen voice. A voice-only
 /// change (via `configure_voice`) preserves the pool.
-pub async fn configure_provider() -> Result<()> {
+pub async fn configure_tts() -> Result<()> {
     let mut cfg = config::load()?;
-    let new_provider = provider::select_provider(Some(&cfg.provider))?;
+    let new_provider = provider::select_provider(Some(&cfg.tts))?;
     let tts_provider = tts::create_provider(
         &new_provider.name,
         &new_provider.api_key,
         &new_provider.model,
     )?;
 
-    let current_default = if cfg.provider.name == new_provider.name {
+    let current_default = if cfg.tts.name == new_provider.name {
         Some(cfg.voice.default.as_str())
     } else {
         None
@@ -75,8 +82,8 @@ pub async fn configure_provider() -> Result<()> {
     let new_voice = voice::select_voice(tts_provider.as_ref(), current_default).await?;
     let _ = test::test_audio(tts_provider.as_ref(), &new_voice).await?;
 
-    let provider_changed = cfg.provider.name != new_provider.name;
-    cfg.provider = new_provider;
+    let provider_changed = cfg.tts.name != new_provider.name;
+    cfg.tts = new_provider;
     cfg.voice.default = new_voice.clone();
     cfg.voice.pool = if provider_changed {
         vec![new_voice]
@@ -90,7 +97,25 @@ pub async fn configure_provider() -> Result<()> {
 
     config::save(&cfg)?;
     println!();
-    println!("{}", "✓ Provider configuration saved.".green().bold());
+    println!("{}", "✓ TTS configuration saved.".green().bold());
+    Ok(())
+}
+
+/// Re-pick the liaison LLM provider. Preserves every other config section.
+/// PR2 ships only Anthropic; PR6 expands this with OpenAI, Google, MiniMax,
+/// and an OpenAI-compatible adapter.
+pub async fn configure_liaison() -> Result<()> {
+    let mut cfg = config::load()?;
+    let new_liaison = liaison::select_liaison(Some(&cfg.liaison))?;
+    cfg.liaison = new_liaison;
+    config::save(&cfg)?;
+    println!();
+    println!(
+        "{}",
+        "✓ Liaison configuration saved. (End-to-end test will arrive with PR6.)"
+            .green()
+            .bold()
+    );
     Ok(())
 }
 
@@ -99,9 +124,9 @@ pub async fn configure_provider() -> Result<()> {
 pub async fn configure_voice() -> Result<()> {
     let mut cfg = config::load()?;
     let tts_provider = tts::create_provider(
-        &cfg.provider.name,
-        &cfg.provider.api_key,
-        &cfg.provider.model,
+        &cfg.tts.name,
+        &cfg.tts.api_key,
+        &cfg.tts.model,
     )?;
 
     let new_voice =
@@ -133,7 +158,8 @@ pub async fn configure_lane_policy() -> Result<()> {
 /// non-destructive — each sub-flow loads-mutates-saves rather than rewriting
 /// the whole config from defaults.
 pub async fn configure_all() -> Result<()> {
-    configure_provider().await?;
+    configure_tts().await?;
+    configure_liaison().await?;
     configure_lane_policy().await?;
     Ok(())
 }
@@ -158,11 +184,11 @@ fn print_summary(cfg: &Config) {
     println!("{}", "◆ Setup complete!".green().bold());
     println!();
 
-    let provider_display = cfg.provider.name.clone();
-    let model_display = if cfg.provider.model.is_empty() {
+    let provider_display = cfg.tts.name.clone();
+    let model_display = if cfg.tts.model.is_empty() {
         "(none)".to_string()
     } else {
-        cfg.provider.model.clone()
+        cfg.tts.model.clone()
     };
     let voice_display = cfg.voice.default.clone();
     let config_path_display = config::config_path().to_string_lossy().into_owned();

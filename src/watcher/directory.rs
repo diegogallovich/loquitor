@@ -61,12 +61,19 @@ impl DirectoryWatcher {
         let lane_id = Self::lane_id_from_path(&path);
         debug!(lane = %lane_id, path = %path.display(), "New lane detected");
 
+        // Legacy parser knobs — hardcoded during the v0.2.0 pivot because
+        // PR3 gut-deletes the per-line speakability parser entirely. These
+        // values keep the current LaneWatcher compiling and behaving as
+        // before until the turn-buffer rewrite lands.
+        const LEGACY_TOOL_PATTERN: &str = r"^(Bash|Read|Edit|Write|Glob|Grep|Agent|Skill|TaskCreate|TaskUpdate|ToolSearch|WebFetch|WebSearch|NotebookEdit)\s*\(";
+        const LEGACY_SPEAKABILITY_THRESHOLD: f64 = 0.6;
+
         let mut lane_watcher = LaneWatcher::new(
             lane_id.clone(),
             path,
             self.lane_tx.clone(),
-            &self.config.parsing.tool_pattern,
-            self.config.parsing.speakability_threshold,
+            LEGACY_TOOL_PATTERN,
+            LEGACY_SPEAKABILITY_THRESHOLD,
             self.config.queue.coalesce_window_ms,
         );
 
