@@ -15,9 +15,12 @@ export default function Home() {
 
         <br />
 
-        <InfoCard title="Loquitor" subtitle="Let your agents think out loud" />
+        <InfoCard
+          title="Loquitor"
+          subtitle="Hear when your agents need you"
+        />
         <div style={{ color: "var(--term-dim)", paddingLeft: "3ch" }}>
-          v0.1.0 · MIT License
+          v0.2.0 · MIT License
         </div>
 
         <br />
@@ -26,10 +29,16 @@ export default function Home() {
           Rust CLI daemon that watches your AI coding agent&apos;s
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          terminal output and speaks its narrative thoughts
+          terminal output, waits until each turn finishes, and
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          aloud via TTS. Two commands to set up, then forget it.
+          speaks one short summary so you know what just shipped
+        </div>
+        <div style={{ color: "var(--term-text-dim)" }}>
+          and what it&apos;s waiting for. Smart notifications,
+        </div>
+        <div style={{ color: "var(--term-text-dim)" }}>
+          not a running monologue.
         </div>
 
         <br />
@@ -39,24 +48,28 @@ export default function Home() {
         </div>
         <Divider style="single" />
         <div style={{ color: "var(--term-text-dim)" }}>
-          <span style={{ color: "var(--term-green)" }}>✓</span> Auto-detects
-          Claude Code sessions via shell hook
+          <span style={{ color: "var(--term-green)" }}>✓</span> Idle detection
+          per session — fires only when Claude stops
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          <span style={{ color: "var(--term-green)" }}>✓</span> Multiple voices
-          for parallel agents
+          <span style={{ color: "var(--term-green)" }}>✓</span> One LLM-written
+          sentence per turn, prefixed &quot;Regarding {"{session}"}.&quot;
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          <span style={{ color: "var(--term-green)" }}>✓</span> OpenAI,
-          ElevenLabs, MiniMax, macOS Say
+          <span style={{ color: "var(--term-green)" }}>✓</span> Multi-provider:
+          Anthropic, OpenAI, MiniMax for summaries
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          <span style={{ color: "var(--term-green)" }}>✓</span> Smart filtering
-          — speaks thoughts, skips code and tool calls
+          <span style={{ color: "var(--term-green)" }}>✓</span> Multi-provider
+          TTS: OpenAI, ElevenLabs, MiniMax, macOS Say
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          <span style={{ color: "var(--term-green)" }}>✓</span> Stale-drop queue
-          keeps narration current during bursts
+          <span style={{ color: "var(--term-green)" }}>✓</span> Concurrent
+          summaries across lanes, played in turn-end order
+        </div>
+        <div style={{ color: "var(--term-text-dim)" }}>
+          <span style={{ color: "var(--term-green)" }}>✓</span> Secret scrubber
+          before any cloud LLM call (sk-…, ghp_…, JWT, etc.)
         </div>
 
         <br />
@@ -65,31 +78,44 @@ export default function Home() {
           Quick Install
         </div>
         <Divider style="single" />
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-          <span>
-            <span style={{ color: "var(--term-green)" }}>$</span> cargo install
-            loquitor
-          </span>
-          <CopyButton text="cargo install loquitor" />
+        <div style={{ color: "var(--term-text-dim)" }}>
+          Pre-built binaries for macOS (Intel + Apple Silicon)
         </div>
-        <div style={{ color: "var(--term-muted)", marginTop: "4px" }}>or</div>
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-          <span>
-            <span style={{ color: "var(--term-green)" }}>$</span> brew install
-            diegogallovich/tap/loquitor
-          </span>
-          <CopyButton text="brew install diegogallovich/tap/loquitor" />
+        <div style={{ color: "var(--term-text-dim)" }}>
+          and Linux (x86_64 + aarch64) on every release:
         </div>
-        <div style={{ color: "var(--term-muted)", marginTop: "8px" }}>
-          Or download a pre-built binary from{" "}
+        <div style={{ marginTop: "8px" }}>
+          <span style={{ color: "var(--term-green)" }}>→</span>{" "}
           <a
-            href="https://github.com/diegogallovich/loquitor/releases"
+            href="https://github.com/diegogallovich/loquitor/releases/latest"
             target="_blank"
             rel="noopener noreferrer"
           >
-            GitHub Releases
+            github.com/diegogallovich/loquitor/releases/latest
           </a>
-          .
+        </div>
+        <div style={{ color: "var(--term-muted)", marginTop: "12px" }}>
+          Or build from source:
+        </div>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+          <span>
+            <span style={{ color: "var(--term-green)" }}>$</span> git clone
+            https://github.com/diegogallovich/loquitor
+          </span>
+          <CopyButton text="git clone https://github.com/diegogallovich/loquitor" />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+          <span>
+            <span style={{ color: "var(--term-green)" }}>$</span> cd loquitor
+            &amp;&amp; cargo install --path .
+          </span>
+          <CopyButton text="cd loquitor && cargo install --path ." />
+        </div>
+        <div style={{ color: "var(--term-muted)", marginTop: "8px" }}>
+          {"  "}cargo install loquitor and brew tap install
+        </div>
+        <div style={{ color: "var(--term-muted)" }}>
+          {"  "}arrive in a near-future patch.
         </div>
 
         <br />
@@ -101,7 +127,7 @@ export default function Home() {
         <div>
           <span style={{ color: "var(--term-green)" }}>$</span> loquitor init
           <span style={{ color: "var(--term-muted)" }}>
-            {"  "}# One-time setup: TTS provider, voice, test
+            {"  "}# Pick TTS + summary LLM, models, voice
           </span>
         </div>
         <div>
@@ -114,7 +140,10 @@ export default function Home() {
           Then open a new terminal tab and run claude. Loquitor
         </div>
         <div style={{ color: "var(--term-muted)" }}>
-          detects the session and starts narrating automatically.
+          detects each session, waits for Claude to finish a turn,
+        </div>
+        <div style={{ color: "var(--term-muted)" }}>
+          and announces what happened.
         </div>
 
         <br />
@@ -130,19 +159,25 @@ export default function Home() {
         <div style={{ color: "var(--term-text-dim)" }}>
           with{" "}
           <span style={{ color: "var(--term-green)" }}>script -q</span>,
-          capturing output to a log file.
+          capturing output to a per-session log.
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          The daemon tails the log, filters for narrative
+          The daemon tails the log, detects when Claude&apos;s
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          thought lines (skipping tool calls, code, file
+          input prompt stabilises (turn ended), scrubs secrets
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          paths, diagrams), synthesizes via your chosen TTS
+          from the buffer, sends it to your chosen summary LLM,
         </div>
         <div style={{ color: "var(--term-text-dim)" }}>
-          provider, and plays through a single global queue.
+          prepends &quot;Regarding {"{session}"}.&quot;, and plays
+        </div>
+        <div style={{ color: "var(--term-text-dim)" }}>
+          the result through your TTS provider — one sentence,
+        </div>
+        <div style={{ color: "var(--term-text-dim)" }}>
+          one notification, queued in turn-end order across lanes.
         </div>
 
         <br />
