@@ -82,6 +82,7 @@ impl LiaisonProvider for AnthropicProvider {
             })
             .unwrap_or_default();
 
-        Ok(parse_response(ctx.lane_name, &text))
+        let _ = ctx; // lane context is no longer used here — liaison_worker prepends the announcement
+        Ok(parse_response(&text))
     }
 }

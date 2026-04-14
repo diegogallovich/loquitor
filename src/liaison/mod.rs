@@ -1,6 +1,6 @@
-//! Liaison layer — takes a buffered "turn" of raw Claude Code output and
-//! produces a single short natural-language summary that the TTS layer
-//! speaks as a smart notification. Mirrors the `tts` module in shape:
+//! Liaison layer — takes a buffered "turn" of raw Claude Code output
+//! and produces a single short natural-language summary that the TTS
+//! layer speaks as a smart notification. Mirrors `crate::tts` in shape:
 //! one trait, several provider implementations, one `create_provider`
 //! factory driven by config.
 
@@ -12,60 +12,39 @@ pub mod scrub;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
-/// A bounded snapshot of one Claude Code turn — what the user just watched
-/// Claude do, in raw-ish form, plus enough metadata for the summary to be
-/// contextual. Built by the `LaneWatcher` on idle-detection and consumed
-/// exactly once by a `LiaisonProvider`.
+/// A bounded snapshot of one Claude Code turn — what the user just
+/// watched Claude do, in cleaned form. Built by the `LaneWatcher` on
+/// idle detection and consumed once by a `LiaisonProvider`.
 pub struct TurnContext<'a> {
-    /// Human-readable lane name (from config rule, or cwd basename fallback).
-    pub lane_name: &'a str,
-    /// Optional hint about the working directory, useful when the lane name
-    /// isn't self-explanatory (e.g. "dotfiles" lane working on a subpath).
-    pub working_dir_hint: Option<&'a str>,
     /// Post-scrub, ANSI-stripped terminal text. May be prefixed with a
     /// truncation marker if the original turn buffer exceeded its cap.
     pub cleaned_log: &'a str,
-    /// Provider-agnostic cap for the summary output. Cheap providers ignore
-    /// this and just generate a sentence; stricter billing providers use it
-    /// to bound cost per turn.
+    /// Soft cap on the summary length. Cheap providers tend to ignore
+    /// it; stricter billing providers use it to bound per-turn cost.
     pub max_output_tokens: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Urgency {
-    /// Claude finished and is ready — e.g. a question or a review request.
-    #[default]
-    Normal,
-    /// Claude explicitly needs a decision from the user to continue.
-    NeedsAction,
-    /// A tool call or the agent itself failed; the summary should flag it.
-    Error,
-}
-
-/// What a `LiaisonProvider` returns. `text` is the exact string sent to TTS.
+/// What the liaison returns. A plain string that the TTS layer speaks.
+/// The lane announcement is prepended by the liaison worker — not the
+/// LLM and not the provider.
 pub struct TurnSummary {
     pub text: String,
-    pub urgency: Urgency,
 }
 
-/// Trait implemented by every LLM backend that can produce turn summaries.
-/// Mirrors `crate::tts::TtsProvider` in structure so the daemon can treat
-/// both layers uniformly: one provider, one call per unit of work, `Send +
-/// Sync` for `tokio::spawn`.
+/// Trait implemented by every LLM backend that can produce turn
+/// summaries. Mirrors `crate::tts::TtsProvider` in structure so the
+/// daemon can treat both layers uniformly.
 #[async_trait]
 pub trait LiaisonProvider: Send + Sync {
     /// Short id used in logs and wizard menus ("anthropic", "openai", …).
     fn name(&self) -> &str;
-    /// Summarize one turn. Implementations own the HTTP call; cancellation
-    /// on drop is the caller's responsibility via `tokio::time::timeout`.
+    /// Summarize one turn. Implementations own the HTTP call.
     async fn summarize_turn(&self, ctx: &TurnContext<'_>) -> Result<TurnSummary>;
 }
 
-/// Build a `LiaisonProvider` from config values. Factored out so the wizard,
-/// daemon, and CLI all resolve the same way.
+/// Build a `LiaisonProvider` from config values. Factored out so the
+/// wizard, daemon, and CLI all resolve the same way.
 pub fn create_provider(
     name: &str,
     api_key: &str,

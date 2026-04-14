@@ -102,6 +102,6 @@ impl LiaisonProvider for OpenAiProvider {
             .unwrap_or("")
             .to_string();
 
-        Ok(parse_response(ctx.lane_name, &text))
+        Ok(parse_response(&text))
     }
 }

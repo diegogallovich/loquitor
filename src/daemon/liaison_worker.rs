@@ -6,15 +6,21 @@
 //!  LaneWatcher → TurnReady → LiaisonWorker → SummarizedTurn → TtsWorker
 //! ```
 //!
-//! The worker is a single serial task. Parallelising LLM calls is
-//! possible but the downstream audio queue is serial anyway, so
-//! concurrent summaries would just queue up. A single task keeps the
-//! behaviour predictable and rate-limit-friendly.
+//! Summarization runs **concurrently** per turn — when two lanes
+//! finish within the same second, their LLM calls fire in parallel.
+//! A `FuturesOrdered` preserves FIFO order on the way out so the
+//! audio queue always plays them in the order their turns ended.
+//!
+//! The deterministic announcement `"Regarding {lane_name}. "` is
+//! prepended here (not asked of the LLM) so every notification opens
+//! with the lane the listener needs to hear.
 
 use crate::config::{self, types::Config};
 use crate::liaison::scrub::scrub_text;
 use crate::liaison::{LiaisonProvider, TurnContext};
 use crate::watcher::lane::TurnReady;
+use futures::stream::{FuturesOrdered, StreamExt};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -26,38 +32,83 @@ pub struct SummarizedTurn {
     pub lane_id: String,
     pub lane_name: String,
     pub text: String,
-    /// The Instant at which the underlying turn ended. Used downstream
-    /// by the AudioQueue's stale-drop check so notifications about
-    /// turns that completed long ago (say, during a daemon pause)
-    /// don't play out-of-context.
+    /// When the underlying turn ended — used by the audio queue's
+    /// stale-drop check so notifications about long-stale turns don't
+    /// play out of context.
     pub ended_at: Instant,
 }
 
-/// Run the worker loop. Exits when `turn_rx` closes (all senders
-/// dropped) or when `summary_tx`'s receiver is gone.
+/// Run the worker. Reads `TurnReady` off `turn_rx`, spawns a
+/// concurrent summarization task per turn, and forwards the resulting
+/// `SummarizedTurn` to `summary_tx` in arrival order.
 pub async fn run(
     config: Config,
     liaison: Box<dyn LiaisonProvider>,
     mut turn_rx: mpsc::Receiver<TurnReady>,
     summary_tx: mpsc::Sender<SummarizedTurn>,
 ) {
-    info!(
-        provider = %liaison.name(),
-        "Liaison worker started"
-    );
-    while let Some(turn) = turn_rx.recv().await {
-        let summary = handle_turn(turn, &config, liaison.as_ref()).await;
-        if summary_tx.send(summary).await.is_err() {
-            info!("Summary receiver dropped, liaison worker exiting");
-            break;
+    info!(provider = %liaison.name(), "Liaison worker started");
+
+    // Arc so spawned summary tasks can share the provider + config
+    // without cloning them per turn.
+    let liaison: Arc<dyn LiaisonProvider> = Arc::from(liaison);
+    let config = Arc::new(config);
+
+    // Bounded because FuturesOrdered doesn't back-pressure on its own
+    // and we don't want an unbounded number of in-flight LLM calls if
+    // turns arrive faster than audio can play them.
+    let mut pending: FuturesOrdered<tokio::task::JoinHandle<SummarizedTurn>> =
+        FuturesOrdered::new();
+
+    loop {
+        tokio::select! {
+            // New turn → kick off an LLM call in a spawned task.
+            // `biased` makes the select prefer incoming turns over
+            // draining completed ones — small latency win.
+            biased;
+            maybe_turn = turn_rx.recv() => {
+                match maybe_turn {
+                    Some(turn) => {
+                        let cfg = config.clone();
+                        let li = liaison.clone();
+                        pending.push_back(tokio::spawn(async move {
+                            handle_turn(turn, &cfg, li.as_ref()).await
+                        }));
+                    }
+                    None => break, // senders dropped — drain and exit
+                }
+            }
+            // A summary finished — forward in order.
+            Some(join) = pending.next(), if !pending.is_empty() => {
+                match join {
+                    Ok(summary) => {
+                        if summary_tx.send(summary).await.is_err() {
+                            info!("Summary receiver dropped, liaison worker exiting");
+                            return;
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "Summarization task panicked"),
+                }
+            }
+        }
+    }
+
+    // Drain whatever's still mid-flight before exiting cleanly.
+    while let Some(join) = pending.next().await {
+        if let Ok(summary) = join {
+            if summary_tx.send(summary).await.is_err() {
+                break;
+            }
         }
     }
     info!("Liaison worker exiting");
 }
 
-/// One-turn pipeline in a testable shape. Pure(-ish): the only I/O is
-/// the LLM call inside `liaison.summarize_turn`, which tests stub out
-/// via a mock provider.
+/// One-turn pipeline in a testable shape. Builds the `TurnContext`,
+/// optionally scrubs secrets, calls the LLM, and prepends the lane
+/// announcement. Returns a `SummarizedTurn` — **never errors**: the
+/// failure path produces a canned fallback so the listener still gets
+/// the "Claude is waiting" signal.
 pub async fn handle_turn(
     turn: TurnReady,
     config: &Config,
@@ -65,9 +116,6 @@ pub async fn handle_turn(
 ) -> SummarizedTurn {
     let lane_name = config::resolve_lane_name(config, &turn.lane_id);
 
-    // Apply the secret scrubber for any cloud provider. Local providers
-    // (ollama, localhost openai_compat) skip it: the content never leaves
-    // the machine, and scrubbing can degrade summary quality.
     let cleaned_log = if should_scrub(config) {
         scrub_text(&turn.turn_text)
     } else {
@@ -75,13 +123,11 @@ pub async fn handle_turn(
     };
 
     let ctx = TurnContext {
-        lane_name: &lane_name,
-        working_dir_hint: None,
         cleaned_log: &cleaned_log,
         max_output_tokens: config.liaison.max_output_tokens,
     };
 
-    let text = match liaison.summarize_turn(&ctx).await {
+    let summary_text = match liaison.summarize_turn(&ctx).await {
         Ok(summary) => summary.text,
         Err(e) => {
             warn!(
@@ -89,9 +135,14 @@ pub async fn handle_turn(
                 error = %e,
                 "Liaison summarization failed; using canned fallback"
             );
-            canned_fallback(&lane_name, &e)
+            format!("Summary unavailable — {}.", classify_error(&e))
         }
     };
+
+    // Deterministic lane announcement. Always "Regarding {lane}. " so
+    // concurrent lanes don't confuse the listener. Handled here, not
+    // in the prompt, so the LLM can't forget or reword it.
+    let text = format!("Regarding {lane_name}. {summary_text}");
 
     SummarizedTurn {
         lane_id: turn.lane_id,
@@ -122,17 +173,9 @@ pub fn should_scrub(config: &Config) -> bool {
     }
 }
 
-/// Produce a short human-readable notification for the failure path.
-/// The *exact* error goes to the debug log; the spoken version stays
-/// terse so the listener still gets the "Claude is waiting" signal.
-fn canned_fallback(lane_name: &str, err: &anyhow::Error) -> String {
-    let reason = classify_error(err);
-    format!("Claude is waiting in {lane_name}. Summary unavailable — {reason}.")
-}
-
-/// Map a rust/HTTP error into one of a handful of human-readable
-/// phrases. Matched against lowercased debug/display strings of the
-/// error because we don't have structured error kinds from `anyhow`.
+/// Map an anyhow error to a short human phrase. Matched against the
+/// lowercased debug string because `anyhow` doesn't give us typed
+/// kinds, and this is pronunciation-friendly enough for TTS.
 pub fn classify_error(err: &anyhow::Error) -> &'static str {
     let msg = format!("{err:?}").to_lowercase();
     if msg.contains("401") || msg.contains("unauthorized") || msg.contains("authentication") {

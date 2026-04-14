@@ -1,12 +1,12 @@
-//! Tests for the liaison worker: happy-path summary, failure fallback,
-//! scrubber gating, error-phrase classification. A `MockLiaisonProvider`
-//! lets tests control exactly what the "LLM" returns.
+//! Tests for the liaison worker: the deterministic "Regarding {lane}. "
+//! prefix, secret scrubbing decisions, error-fallback shape. A
+//! `MockLiaisonProvider` controls what the "LLM" returns.
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use loquitor::config::types::Config;
 use loquitor::daemon::liaison_worker::{classify_error, handle_turn, should_scrub};
-use loquitor::liaison::{LiaisonProvider, TurnContext, TurnSummary, Urgency};
+use loquitor::liaison::{LiaisonProvider, TurnContext, TurnSummary};
 use loquitor::watcher::lane::TurnReady;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -15,7 +15,7 @@ type FakeResult = Result<TurnSummary, anyhow::Error>;
 
 struct MockLiaisonProvider {
     response: Mutex<Option<FakeResult>>,
-    calls: Mutex<Vec<String>>, // records scrubbed cleaned_log per call
+    calls: Mutex<Vec<String>>, // records cleaned_log seen per call
 }
 
 impl MockLiaisonProvider {
@@ -23,7 +23,6 @@ impl MockLiaisonProvider {
         Self {
             response: Mutex::new(Some(Ok(TurnSummary {
                 text: text.to_string(),
-                urgency: Urgency::Normal,
             }))),
             calls: Mutex::new(Vec::new()),
         }
@@ -64,28 +63,50 @@ fn fake_turn(lane: &str, text: &str) -> TurnReady {
     }
 }
 
-// --- handle_turn happy path ---
+// --- handle_turn: lane prefix + happy path ---
 
 #[tokio::test]
-async fn happy_path_returns_provider_text() {
+async fn prepends_lane_announcement_deterministically() {
     let cfg = Config::default();
     let provider = MockLiaisonProvider::with_success(
-        "In loquitor: finished the refactor. Waiting for you to review.",
+        "Finished the refactor. Waiting for you to review.",
     );
     let turn = fake_turn("loquitor", "some terminal output");
 
     let out = handle_turn(turn, &cfg, &provider).await;
     assert_eq!(out.lane_id, "loquitor");
-    assert_eq!(out.lane_name, "loquitor"); // no rule → falls back to id
+    assert_eq!(out.lane_name, "loquitor");
     assert_eq!(
         out.text,
-        "In loquitor: finished the refactor. Waiting for you to review."
+        "Regarding loquitor. Finished the refactor. Waiting for you to review."
+    );
+}
+
+#[tokio::test]
+async fn uses_friendly_lane_name_from_rule() {
+    use loquitor::config::types::LaneRule;
+    let mut cfg = Config::default();
+    cfg.lanes.rules.insert(
+        "dev-repo".into(),
+        LaneRule {
+            name: "Project Alpha".into(),
+            voice: "nova".into(),
+        },
+    );
+    let provider = MockLiaisonProvider::with_success("Done. Waiting for you.");
+    let turn = fake_turn("dev-repo", "x");
+
+    let out = handle_turn(turn, &cfg, &provider).await;
+    assert!(
+        out.text.starts_with("Regarding Project Alpha. "),
+        "friendly name missing: {}",
+        out.text
     );
 }
 
 #[tokio::test]
 async fn scrubber_runs_for_default_cloud_provider() {
-    let cfg = Config::default(); // defaults to anthropic + scrub_secrets=true
+    let cfg = Config::default();
     let provider = MockLiaisonProvider::with_success("ok");
     let turn = fake_turn(
         "x",
@@ -106,15 +127,15 @@ async fn scrubber_runs_for_default_cloud_provider() {
 // --- handle_turn failure fallback ---
 
 #[tokio::test]
-async fn failure_produces_canned_fallback_with_lane_name() {
+async fn failure_produces_canned_fallback_with_lane_prefix() {
     let cfg = Config::default();
     let provider = MockLiaisonProvider::with_error(anyhow!("HTTP 401: invalid api key"));
     let turn = fake_turn("my-project", "whatever");
 
     let out = handle_turn(turn, &cfg, &provider).await;
     assert!(
-        out.text.starts_with("Claude is waiting in my-project."),
-        "canned opener missing: {}",
+        out.text.starts_with("Regarding my-project. Summary unavailable —"),
+        "fallback shape wrong: {}",
         out.text
     );
     assert!(
@@ -179,7 +200,6 @@ fn classify_unknown_falls_back() {
 
 #[test]
 fn should_scrub_default_cloud_on() {
-    // Default config: anthropic provider, scrub_secrets=true.
     let cfg = Config::default();
     assert!(should_scrub(&cfg));
 }
@@ -188,7 +208,7 @@ fn should_scrub_default_cloud_on() {
 fn should_scrub_ollama_always_off() {
     let mut cfg = Config::default();
     cfg.liaison.name = "ollama".into();
-    cfg.liaison.scrub_secrets = true; // even explicitly on
+    cfg.liaison.scrub_secrets = true;
     assert!(!should_scrub(&cfg), "local provider should skip scrub");
 }
 
@@ -217,5 +237,5 @@ fn should_scrub_openai_compat_remote_respects_flag() {
 fn should_scrub_cloud_respects_opt_out() {
     let mut cfg = Config::default();
     cfg.liaison.scrub_secrets = false;
-    assert!(!should_scrub(&cfg), "explicit opt-out disables scrub");
+    assert!(!should_scrub(&cfg));
 }
