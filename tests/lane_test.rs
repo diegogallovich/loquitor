@@ -15,6 +15,9 @@ fn make_watcher(max_bytes: usize) -> LaneWatcher {
         confirm_frames: 2,
         min_silence: Duration::ZERO,
         turn_max_duration: Duration::from_secs(3600),
+        // Disabled — the existing lane_test cases drive the per-line
+        // path; the inactivity path is covered in tests/idle_test.rs.
+        quiet_threshold: Duration::from_secs(3600),
     };
     let (tx, _rx) = mpsc::channel::<TurnReady>(16);
     LaneWatcher::new(

@@ -1,51 +1,57 @@
 //! Idle detector for Claude Code sessions.
 //!
-//! Pure state machine: no tasks, no sleeps, no I/O. The LaneWatcher feeds
-//! each cleaned (ANSI-stripped) line into `feed()` along with the current
-//! `Instant`; the machine transitions and optionally returns a
-//! `TurnEvent::TurnEnded` signal on the exact line that closes a turn.
+//! Pure state machine: no tasks, no sleeps, no I/O. The LaneWatcher
+//! feeds each cleaned (ANSI-stripped) line into `feed()` along with the
+//! current `Instant`; on every poll cycle (whether or not a new line
+//! arrived) it also calls `tick()` so the inactivity-based path can
+//! fire even when Claude has gone completely quiet.
 //!
-//! Detection rule — verified against live Claude Code logs:
-//!   - A "prompt frame" is a cleaned line whose non-whitespace chars are
-//!     all in the Unicode Box Drawing block (U+2500–U+257F).
-//!   - After `confirm_frames` identical prompt frames AND `min_silence`
-//!     elapsed since the first of them, the turn is declared ended.
-//!   - Any content line while in PossibleIdle resets to Collecting.
-//!   - A content line after `turn_max_duration` in Collecting force-ships.
+//! Two independent signals can confirm "Claude is waiting for input":
+//!
+//!   1. **Inactivity** (primary): no new bytes for `quiet_threshold`
+//!      seconds while we're in `Collecting`. Robust to whatever the
+//!      TUI looks like — a real Claude Code prompt includes a lot more
+//!      than just box-drawing chars (model name, ctx %, mode hints,
+//!      a "thinking" indicator), so byte-level silence is the only
+//!      truly reliable signal.
+//!   2. **Stable prompt frame** (secondary): N identical box-drawing
+//!      lines in a row, separated by `min_silence`. Kept as a fast
+//!      path in case Claude ever does emit a clean prompt-frame
+//!      sequence — costs nothing extra.
+//!
+//! Both paths emit `TurnEvent::TurnEnded` and reset to `Idle`.
 
 use std::time::{Duration, Instant};
 
-/// Tuning parameters for the detector. Wire these in from
-/// `Config::daemon.idle_*` / `turn_max_duration_secs` at spawn time.
 #[derive(Debug, Clone, Copy)]
 pub struct IdleCfg {
-    /// How many *identical* prompt frames in a row confirm an idle state.
+    /// Identical-prompt-frame threshold for the secondary signal.
     pub confirm_frames: u32,
-    /// Minimum wall-clock gap between the first prompt frame and the
-    /// emission of TurnEnded. Defends against fast-redraw TUI flashes.
+    /// Minimum gap between first and last identical frame for the
+    /// secondary signal.
     pub min_silence: Duration,
-    /// Maximum age of a Collecting turn. If exceeded, the next content
-    /// line forces the turn to ship with whatever has accumulated.
-    /// Catches hung sessions (Claude crashed mid-turn).
+    /// Hard cap on a `Collecting` turn — force-ship after this even
+    /// if neither signal fires (Claude hung).
     pub turn_max_duration: Duration,
+    /// Primary signal: end the turn if `Collecting` has had no new
+    /// content for this long. Default is 3s — long enough to ride
+    /// through small "thinking" pauses, short enough to feel snappy.
+    pub quiet_threshold: Duration,
 }
 
-/// Three-stage lifecycle per lane.
-///
-/// `Idle` is the initial/post-turn resting state — no active buffering.
-/// `Collecting` is "Claude is writing." `PossibleIdle` is "Claude looks
-/// done, but we need a few stable frames to confirm before shipping."
 #[derive(Debug)]
 pub enum IdleState {
     Idle,
     Collecting {
         turn_started: Instant,
+        last_content_at: Instant,
     },
     PossibleIdle {
         since: Instant,
         frames: u32,
         last_frame: String,
         turn_started: Instant,
+        last_content_at: Instant,
     },
 }
 
@@ -61,33 +67,24 @@ impl Default for IdleState {
     }
 }
 
-/// Classification of a single cleaned line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineClass {
-    /// Line consists only of whitespace + box-drawing characters.
-    /// Payload is the trimmed frame content — used to compare stability
-    /// across successive frames.
+    /// Cleaned line is whitespace + box-drawing only. Payload is the
+    /// trimmed frame — used to compare stability across frames.
     PromptFrame(String),
-    /// Any other line (including empty). Counts as "Claude is still
-    /// producing output" for state-machine purposes.
+    /// Any other line (including empty). "Claude is still producing
+    /// output" for state-machine purposes.
     Content,
 }
 
-/// The one event the detector can emit.
 #[derive(Debug, PartialEq, Eq)]
 pub enum TurnEvent {
-    /// The current turn just ended — the caller should flush its turn
-    /// buffer to whatever consumes TurnReady downstream.
     TurnEnded,
 }
 
-/// Classify a single cleaned line. Pure function — easy to test.
 pub fn classify(cleaned: &str) -> LineClass {
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
-        // Blank lines count as Content because Claude often emits them
-        // mid-turn between paragraphs. Treating them as prompt frames
-        // would misfire idle on every paragraph break.
         return LineClass::Content;
     }
     if trimmed.chars().all(is_box_drawing_or_ws) {
@@ -98,31 +95,27 @@ pub fn classify(cleaned: &str) -> LineClass {
 }
 
 fn is_box_drawing_or_ws(c: char) -> bool {
-    // Unicode Box Drawing block is U+2500..=U+257F.
-    // Whitespace covers spaces, tabs, NBSP — all expected inside a prompt
-    // frame (the TUI pads between border chars).
     c.is_whitespace() || matches!(c as u32, 0x2500..=0x257F)
 }
 
-/// Pure state transition. Call once per cleaned line. Returns
-/// `Some(TurnEnded)` exactly on the transition that closes a turn —
-/// never on subsequent lines until a new Collecting period is opened.
+/// Per-line state transition. Refreshes the inactivity clock on every
+/// content line so `tick()` knows when activity last happened.
 pub fn feed(
     state: &mut IdleState,
     class: LineClass,
     now: Instant,
     cfg: &IdleCfg,
 ) -> Option<TurnEvent> {
-    // Take ownership of the current state so we can destructure its
-    // owned fields (String frames) without clones.
     let current = std::mem::replace(state, IdleState::Idle);
 
     match (current, class) {
-        // Idle: waiting for Claude to start talking. A content line
-        // starts a new turn; prompt frames while idle are noise
-        // (someone scrolling the log, detector restart, etc.).
+        // Idle: a content line opens a new turn. Prompt frames while
+        // idle are noise.
         (IdleState::Idle, LineClass::Content) => {
-            *state = IdleState::Collecting { turn_started: now };
+            *state = IdleState::Collecting {
+                turn_started: now,
+                last_content_at: now,
+            };
             None
         }
         (IdleState::Idle, LineClass::PromptFrame(_)) => {
@@ -130,35 +123,43 @@ pub fn feed(
             None
         }
 
-        // Collecting: normal "Claude is emitting output" path.
-        // Content keeps the turn going; a force-ship fires if we've
-        // been collecting for longer than turn_max_duration.
-        (IdleState::Collecting { turn_started }, LineClass::Content) => {
+        // Collecting: refresh inactivity clock on every line.
+        (IdleState::Collecting { turn_started, .. }, LineClass::Content) => {
             if now.saturating_duration_since(turn_started) >= cfg.turn_max_duration {
                 *state = IdleState::Idle;
                 Some(TurnEvent::TurnEnded)
             } else {
-                *state = IdleState::Collecting { turn_started };
+                *state = IdleState::Collecting {
+                    turn_started,
+                    last_content_at: now,
+                };
                 None
             }
         }
-        (IdleState::Collecting { turn_started }, LineClass::PromptFrame(frame)) => {
-            // First prompt-frame sighting — might be a brief flash before
-            // Claude resumes. Enter PossibleIdle and start counting.
+        (
+            IdleState::Collecting {
+                turn_started,
+                last_content_at: _,
+            },
+            LineClass::PromptFrame(frame),
+        ) => {
             *state = IdleState::PossibleIdle {
                 since: now,
                 frames: 1,
                 last_frame: frame,
                 turn_started,
+                last_content_at: now,
             };
             None
         }
 
-        // PossibleIdle: we've seen 1+ prompt frame. Content resets to
-        // Collecting (Claude resumed). Same-frame increments; different-
-        // frame resets the count with the new frame as the baseline.
+        // PossibleIdle: content resets to Collecting; same-frame
+        // increments; different-frame resets the count.
         (IdleState::PossibleIdle { turn_started, .. }, LineClass::Content) => {
-            *state = IdleState::Collecting { turn_started };
+            *state = IdleState::Collecting {
+                turn_started,
+                last_content_at: now,
+            };
             None
         }
         (
@@ -167,6 +168,7 @@ pub fn feed(
                 frames,
                 last_frame,
                 turn_started,
+                last_content_at,
             },
             LineClass::PromptFrame(new_frame),
         ) => {
@@ -183,17 +185,73 @@ pub fn feed(
                         frames: next_frames,
                         last_frame,
                         turn_started,
+                        last_content_at,
                     };
                     None
                 }
             } else {
-                // Frame content shifted — reset the stability counter
-                // but stay in PossibleIdle (we're still seeing frames).
                 *state = IdleState::PossibleIdle {
                     since: now,
                     frames: 1,
                     last_frame: new_frame,
                     turn_started,
+                    last_content_at,
+                };
+                None
+            }
+        }
+    }
+}
+
+/// Time-based check called from the LaneWatcher's polling loop on
+/// every iteration (whether or not new bytes arrived). Fires
+/// `TurnEnded` when `Collecting` has been quiet for `quiet_threshold`
+/// — the primary signal that Claude is waiting for input. Also
+/// catches the force-ship path when `turn_max_duration` is exceeded.
+pub fn tick(state: &mut IdleState, now: Instant, cfg: &IdleCfg) -> Option<TurnEvent> {
+    let current = std::mem::replace(state, IdleState::Idle);
+    match current {
+        IdleState::Idle => {
+            *state = IdleState::Idle;
+            None
+        }
+        IdleState::Collecting {
+            turn_started,
+            last_content_at,
+        } => {
+            let quiet = now.saturating_duration_since(last_content_at);
+            let total = now.saturating_duration_since(turn_started);
+            if quiet >= cfg.quiet_threshold || total >= cfg.turn_max_duration {
+                *state = IdleState::Idle;
+                Some(TurnEvent::TurnEnded)
+            } else {
+                *state = IdleState::Collecting {
+                    turn_started,
+                    last_content_at,
+                };
+                None
+            }
+        }
+        IdleState::PossibleIdle {
+            since,
+            frames,
+            last_frame,
+            turn_started,
+            last_content_at,
+        } => {
+            // Same fall-through: prolonged silence in PossibleIdle is
+            // the same signal as in Collecting — Claude is done.
+            let quiet = now.saturating_duration_since(last_content_at);
+            if quiet >= cfg.quiet_threshold {
+                *state = IdleState::Idle;
+                Some(TurnEvent::TurnEnded)
+            } else {
+                *state = IdleState::PossibleIdle {
+                    since,
+                    frames,
+                    last_frame,
+                    turn_started,
+                    last_content_at,
                 };
                 None
             }

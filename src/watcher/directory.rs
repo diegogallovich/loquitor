@@ -4,7 +4,9 @@ use crate::audio::LaneId;
 use crate::config::types::Config;
 use anyhow::Result;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -13,6 +15,12 @@ pub struct DirectoryWatcher {
     lanes_dir: PathBuf,
     config: Config,
     turn_tx: mpsc::Sender<TurnReady>,
+    /// Tracks which .log paths already have a LaneWatcher spawned, so
+    /// duplicate Create events from notify (macOS FSEvents fires one
+    /// per `script(1)` open + chmod + first-write) don't spawn 4
+    /// watchers per lane — observed in real logs as identical
+    /// "Lane watcher started" lines milliseconds apart.
+    spawned: Mutex<HashSet<PathBuf>>,
 }
 
 impl DirectoryWatcher {
@@ -21,6 +29,7 @@ impl DirectoryWatcher {
             lanes_dir,
             config,
             turn_tx,
+            spawned: Mutex::new(HashSet::new()),
         }
     }
 
@@ -60,6 +69,12 @@ impl DirectoryWatcher {
     }
 
     fn spawn_lane_watcher(&self, path: PathBuf) {
+        // Dedupe — see field comment on `spawned`.
+        if !self.spawned.lock().unwrap().insert(path.clone()) {
+            debug!(path = %path.display(), "Duplicate Create event for known lane file; ignoring");
+            return;
+        }
+
         let lane_id = Self::lane_id_from_path(&path);
         debug!(lane = %lane_id, path = %path.display(), "New lane detected");
 
@@ -67,6 +82,7 @@ impl DirectoryWatcher {
             confirm_frames: self.config.daemon.idle_confirm_frames,
             min_silence: Duration::from_millis(self.config.daemon.idle_min_silence_ms),
             turn_max_duration: Duration::from_secs(self.config.daemon.turn_max_duration_secs),
+            quiet_threshold: Duration::from_millis(self.config.daemon.idle_quiet_ms),
         };
 
         let mut lane_watcher = LaneWatcher::new(

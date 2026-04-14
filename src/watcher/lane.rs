@@ -130,10 +130,72 @@ impl LaneWatcher {
                 }
             }
 
+            // After draining whatever's available, ask the idle
+            // detector if enough quiet time has passed to call the
+            // turn ended. This is the *primary* idle signal — it
+            // fires regardless of whether the TUI ever emits a clean
+            // box-drawing-only prompt frame, which the real Claude
+            // Code prompt does NOT (it includes status text like
+            // "Opus 4.6 (1M context) · 8% ctx · main").
+            if let Some(event) = self.tick(Instant::now()) {
+                if self.turn_tx.send(event).await.is_err() {
+                    info!(
+                        lane = %self.lane_id,
+                        "Turn receiver dropped, lane watcher exiting"
+                    );
+                    return Ok(());
+                }
+            }
+
             if !read_any {
                 sleep(poll_interval).await;
             }
         }
+    }
+
+    /// Time-based check called every poll iteration. Returns a
+    /// `TurnReady` when `idle::tick` decides the turn is over (no
+    /// content for `quiet_threshold`, OR `turn_max_duration` cap).
+    fn tick(&mut self, now: Instant) -> Option<TurnReady> {
+        let event = idle::tick(&mut self.idle_state, now, &self.idle_cfg);
+        if event == Some(idle::TurnEvent::TurnEnded) {
+            self.flush(now)
+        } else {
+            None
+        }
+    }
+
+    /// Drain the per-turn buffer into a `TurnReady`. Called from both
+    /// the line-driven (`process_line_at`) and the inactivity-driven
+    /// (`tick`) paths so the flush logic is single-source-of-truth.
+    fn flush(&mut self, now: Instant) -> Option<TurnReady> {
+        if self.buffer.is_empty() && !self.truncated && self.turn_started.is_none() {
+            // Nothing to flush — defensive against double-fire.
+            return None;
+        }
+        let started_at = self.turn_started.take().unwrap_or(now);
+        let truncated = self.truncated;
+        self.truncated = false;
+        let body: String = std::mem::take(&mut self.buffer).into_iter().collect();
+        self.buffer_bytes = 0;
+        let turn_text = if truncated {
+            format!("[earlier output truncated]\n{body}")
+        } else {
+            body
+        };
+        debug!(
+            lane = %self.lane_id,
+            bytes = turn_text.len(),
+            truncated,
+            "Turn flushing"
+        );
+        Some(TurnReady {
+            lane_id: self.lane_id.clone(),
+            turn_text,
+            started_at,
+            ended_at: now,
+            truncated,
+        })
     }
 
     /// Apply one raw line to the watcher's state and optionally return a
@@ -170,33 +232,8 @@ impl LaneWatcher {
         }
 
         let event = idle::feed(&mut self.idle_state, class, now, &self.idle_cfg);
-        // The rest of the body uses `now` instead of a second
-        // Instant::now() call so tests remain deterministic.
-
         if event == Some(TurnEvent::TurnEnded) {
-            let started_at = self.turn_started.take().unwrap_or(now);
-            let truncated = self.truncated;
-            self.truncated = false;
-            let body: String = std::mem::take(&mut self.buffer).into_iter().collect();
-            self.buffer_bytes = 0;
-            let turn_text = if truncated {
-                format!("[earlier output truncated]\n{body}")
-            } else {
-                body
-            };
-            debug!(
-                lane = %self.lane_id,
-                bytes = turn_text.len(),
-                truncated,
-                "Turn flushing"
-            );
-            Some(TurnReady {
-                lane_id: self.lane_id.clone(),
-                turn_text,
-                started_at,
-                ended_at: now,
-                truncated,
-            })
+            self.flush(now)
         } else {
             None
         }

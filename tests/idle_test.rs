@@ -2,7 +2,7 @@
 //! sequences. No real time: each test fabricates `Instant`s to prove
 //! the transitions and timing behaviours without sleeps.
 
-use loquitor::watcher::idle::{classify, feed, IdleCfg, IdleState, LineClass, TurnEvent};
+use loquitor::watcher::idle::{classify, feed, tick, IdleCfg, IdleState, LineClass, TurnEvent};
 use std::time::{Duration, Instant};
 
 fn default_cfg() -> IdleCfg {
@@ -10,6 +10,9 @@ fn default_cfg() -> IdleCfg {
         confirm_frames: 3,
         min_silence: Duration::from_millis(500),
         turn_max_duration: Duration::from_secs(1800),
+        // Effectively disabled so the existing per-line tests don't
+        // accidentally fire the inactivity-based path.
+        quiet_threshold: Duration::from_secs(3600),
     }
 }
 
@@ -278,6 +281,82 @@ fn reset_on_mid_sequence_content_blocks_spurious_idle() {
     assert_eq!(r, Some(TurnEvent::TurnEnded));
 }
 
+// --- tick(): inactivity-based primary signal ---
+
+#[test]
+fn tick_fires_when_collecting_quiet_threshold_elapses() {
+    // The primary idle signal — fires regardless of whether a clean
+    // box-drawing prompt frame ever appears. This is what makes
+    // detection robust to Claude Code's actual TUI.
+    let mut s = IdleState::new();
+    let cfg = IdleCfg {
+        confirm_frames: 3,
+        min_silence: Duration::from_millis(500),
+        turn_max_duration: Duration::from_secs(1800),
+        quiet_threshold: Duration::from_millis(500),
+    };
+    let t0 = Instant::now();
+
+    feed(&mut s, LineClass::Content, t0, &cfg);
+    // Tick before quiet_threshold — no event.
+    assert_eq!(tick(&mut s, t0 + Duration::from_millis(200), &cfg), None);
+    assert!(matches!(s, IdleState::Collecting { .. }));
+
+    // Tick after quiet_threshold — emit TurnEnded, transition to Idle.
+    assert_eq!(
+        tick(&mut s, t0 + Duration::from_millis(600), &cfg),
+        Some(TurnEvent::TurnEnded)
+    );
+    assert!(matches!(s, IdleState::Idle));
+}
+
+#[test]
+fn tick_resets_quiet_clock_on_new_content() {
+    let mut s = IdleState::new();
+    let cfg = IdleCfg {
+        confirm_frames: 3,
+        min_silence: Duration::from_millis(500),
+        turn_max_duration: Duration::from_secs(1800),
+        quiet_threshold: Duration::from_millis(500),
+    };
+    let t0 = Instant::now();
+
+    feed(&mut s, LineClass::Content, t0, &cfg);
+    // Almost-stale tick at t+400ms — under threshold, no event.
+    assert_eq!(tick(&mut s, t0 + Duration::from_millis(400), &cfg), None);
+    // New content arrives — clock resets.
+    feed(
+        &mut s,
+        LineClass::Content,
+        t0 + Duration::from_millis(450),
+        &cfg,
+    );
+    // Tick at t+800ms — only 350ms since last content, no event.
+    assert_eq!(tick(&mut s, t0 + Duration::from_millis(800), &cfg), None);
+    // Tick at t+1000ms — 550ms quiet, fires.
+    assert_eq!(
+        tick(&mut s, t0 + Duration::from_millis(1000), &cfg),
+        Some(TurnEvent::TurnEnded)
+    );
+}
+
+#[test]
+fn tick_does_nothing_when_idle() {
+    let mut s = IdleState::new();
+    let cfg = IdleCfg {
+        confirm_frames: 3,
+        min_silence: Duration::from_millis(500),
+        turn_max_duration: Duration::from_secs(1800),
+        quiet_threshold: Duration::from_millis(100),
+    };
+    // Start in Idle. tick() should never emit anything from Idle.
+    assert_eq!(
+        tick(&mut s, Instant::now() + Duration::from_secs(60), &cfg),
+        None
+    );
+    assert!(matches!(s, IdleState::Idle));
+}
+
 #[test]
 fn force_ship_on_turn_max_duration_exceeded() {
     let mut s = IdleState::new();
@@ -286,6 +365,7 @@ fn force_ship_on_turn_max_duration_exceeded() {
         confirm_frames: 3,
         min_silence: Duration::from_millis(500),
         turn_max_duration: Duration::from_secs(2),
+        quiet_threshold: Duration::from_secs(3600),
     };
 
     feed(&mut s, LineClass::Content, t0, &cfg);
@@ -313,6 +393,7 @@ fn exactly_confirm_frames_at_exactly_min_silence_fires() {
         confirm_frames: 2,
         min_silence: Duration::from_millis(100),
         turn_max_duration: Duration::from_secs(1800),
+        quiet_threshold: Duration::from_secs(3600),
     };
 
     feed(&mut s, LineClass::Content, t0, &cfg);

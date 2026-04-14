@@ -107,14 +107,20 @@ pub struct DaemonConfig {
     pub pid_file: String,
     pub log_level: String,
     /// Number of identical consecutive prompt frames required to confirm
-    /// that Claude is idle. Lower = faster notifications but more misfires
-    /// on brief mid-turn prompt flashes.
+    /// that Claude is idle (secondary signal — only fires when Claude
+    /// emits a clean box-drawing-only prompt frame).
     #[serde(default = "default_idle_confirm_frames")]
     pub idle_confirm_frames: u32,
     /// Minimum ms of quiet (no non-prompt output) between the first
     /// detected prompt frame and the idle emission.
     #[serde(default = "default_idle_min_silence_ms")]
     pub idle_min_silence_ms: u64,
+    /// **Primary** idle signal: end the turn if no new bytes have hit
+    /// the lane log for this many ms. Robust to whatever the TUI looks
+    /// like — Claude's input prompt has too much status text to match
+    /// the box-drawing classifier reliably.
+    #[serde(default = "default_idle_quiet_ms")]
+    pub idle_quiet_ms: u64,
     /// Upper bound on per-lane turn buffer size. When exceeded, the buffer
     /// front-truncates and the turn is marked `truncated`.
     #[serde(default = "default_turn_buffer_max_bytes")]
@@ -130,6 +136,9 @@ fn default_idle_confirm_frames() -> u32 {
 }
 fn default_idle_min_silence_ms() -> u64 {
     500
+}
+fn default_idle_quiet_ms() -> u64 {
+    3000
 }
 fn default_turn_buffer_max_bytes() -> usize {
     262144
@@ -185,6 +194,7 @@ impl Default for Config {
                 log_level: "info".into(),
                 idle_confirm_frames: default_idle_confirm_frames(),
                 idle_min_silence_ms: default_idle_min_silence_ms(),
+                idle_quiet_ms: default_idle_quiet_ms(),
                 turn_buffer_max_bytes: default_turn_buffer_max_bytes(),
                 turn_max_duration_secs: default_turn_max_duration_secs(),
             },
