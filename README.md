@@ -1,64 +1,86 @@
 # Loquitor
 
-> Let your agents think out loud
+> Hear when your agents need you.
 
-Loquitor is a Rust CLI daemon that watches your AI coding agent's terminal output (starting with Claude Code), extracts its narrative thought lines, and speaks them aloud via TTS. It supports multiple concurrent sessions with different voices, so you can distinguish parallel workstreams by ear.
+Loquitor is a Rust CLI daemon that watches your AI coding agent's terminal output (starting with Claude Code), waits until each turn finishes, and speaks one short summary so you know what just shipped and what it's waiting for. Smart notifications, not a running monologue.
+
+It supports multiple concurrent sessions ("lanes") with different voices, so parallel work-streams stay distinguishable by ear.
 
 **Full docs and install guide:** [loquitor.reachdiego.com](https://loquitor.reachdiego.com)
 
 ## Quick Install
 
+Pre-built binaries for macOS (Intel + Apple Silicon) and Linux (x86_64 + aarch64) on every release:
+
+→ <https://github.com/diegogallovich/loquitor/releases/latest>
+
+Or build from source:
+
 ```bash
-cargo install loquitor
+git clone https://github.com/diegogallovich/loquitor
+cd loquitor && cargo install --path .
 ```
 
-Or download a pre-built binary from the [releases page](https://github.com/diegogallovich/loquitor/releases).
+`cargo install loquitor` and `brew install diegogallovich/tap/loquitor` are tracked for a near-future patch — see [`docs/RELEASE-INFRA.md`](docs/RELEASE-INFRA.md).
 
 ## Getting Started
 
 ```bash
-loquitor init        # Setup wizard: pick TTS provider, voice, test audio
+loquitor init        # Pick TTS + summary LLM, model, voice, key reuse
 loquitor enable      # Install shell hook + start daemon
 ```
 
-Then open a new terminal tab and run `claude` as you normally would. Loquitor will detect the session and start narrating.
+Then open a new terminal tab and run `claude` as you normally would. Loquitor detects each session, waits for Claude to finish a turn, and announces what happened in one short sentence prefixed `Regarding {session}.`
 
 ## CLI
 
 ```
-loquitor init        Run the first-time setup wizard
-loquitor enable      Install shell hook and start the background daemon
-loquitor disable     Remove shell hook and stop the daemon
-loquitor status      Show daemon status
-loquitor lanes       List active lanes
-loquitor lane <id> --name <n> --voice <v>   Rename a lane or change its voice
-loquitor voices      List available voices from the configured TTS provider
-loquitor test <text> Speak a test phrase
+loquitor init                                    Run the first-time setup wizard
+loquitor configure <tts | liaison | voice |
+                    lane-policy | all>          Re-pick one slice non-destructively
+loquitor enable                                  Install shell hook + start daemon
+loquitor disable                                 Remove shell hook + stop daemon
+loquitor status                                  Show daemon status
+loquitor lanes                                   List active lanes
+loquitor lane <id> --name <n> --voice <v>        Rename a lane or change its voice
+loquitor voices                                  List voices from configured TTS
+loquitor test <text>                             Speak a test phrase
 ```
 
-## Supported TTS Providers
+## Supported Providers
 
-- **OpenAI TTS** — $15/M chars, simple setup, good quality
-- **ElevenLabs** — Best voices, lowest latency, from $5/mo
-- **MiniMax** — $60/M chars, multilingual, expressive
-- **macOS Say** — Free, offline, built-in (lower quality)
+**TTS (the voice that speaks notifications):**
+- OpenAI TTS — simple setup, good quality
+- ElevenLabs — best voices, lowest latency
+- MiniMax — multilingual, expressive
+- macOS Say — free, offline, built-in
+
+**Liaison (the LLM that summarises Claude turns):**
+- Anthropic Claude — Opus / Sonnet / Haiku
+- OpenAI — GPT-5.4 family + legacy mini
+- MiniMax — M2 series
+- "Custom model id…" escape hatch for any model not in the curated list
 
 ## Requirements
 
-- macOS (primary target for v0.1.0 — Linux support for non-macOS providers coming soon)
+- macOS or Linux
 - zsh shell
-- Rust 1.85+ (if building from source)
+- Rust 1.94+ (only if building from source)
 
 ## Configuration
 
-Loquitor stores its config at `~/.config/loquitor/config.toml`. The setup wizard populates this file — you rarely need to edit it by hand. See the [config reference](https://loquitor.reachdiego.com/config) for details on lane rules, voice pools, and parsing tuning.
+Loquitor stores its config at `~/.config/loquitor/config.toml`. The setup wizard populates it — you rarely need to edit by hand. See [`docs/DESIGN.md`](docs/DESIGN.md) for the schema, and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how the pieces fit together.
 
 ## How It Works
 
 1. `loquitor enable` installs a small zsh hook in `~/.zshrc` that wraps the `claude` command with `script -q`, capturing terminal output to `~/.config/loquitor/lanes/<project>-<timestamp>.log`.
-2. The daemon watches that directory with `notify`. New `.log` files spawn per-lane watcher tasks.
-3. Each lane watcher tails its log file, strips ANSI escapes, and uses a 6-stage parser to extract narrative thought lines (filtering out tool invocations, code blocks, file paths, etc.).
-4. Speakable text is synthesized via the configured TTS provider and queued for playback. A single global audio queue plays utterances serially — lanes never talk over each other. Utterances older than 15 seconds are dropped to keep narration current.
+2. The daemon watches that directory with `notify`. Each new `.log` file spawns a per-lane watcher.
+3. Each lane watcher tails its log, strips ANSI, and feeds lines into a pure-function idle-detector state machine that fires when Claude's input prompt stabilises (turn ended).
+4. On turn-end, the buffered text is scrubbed for secrets (`sk-…`, `ghp_…`, JWT, etc.) and shipped to the configured liaison LLM, which returns one short sentence.
+5. The summary is prefixed `Regarding {lane_name}.` and synthesised through your TTS provider.
+6. A single global audio queue plays summaries serially across all lanes — they never overlap. Stale summaries (>15s old at dequeue) are dropped to keep notifications current.
+
+Multiple simultaneous turn-ends summarise concurrently (one LLM call per lane, in parallel) and play in turn-end order — preserved via `futures::FuturesOrdered`.
 
 ## License
 
