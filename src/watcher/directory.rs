@@ -1,24 +1,26 @@
-use super::lane::{LaneMessage, LaneWatcher};
+use super::idle::IdleCfg;
+use super::lane::{LaneWatcher, TurnReady};
 use crate::audio::LaneId;
 use crate::config::types::Config;
 use anyhow::Result;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 pub struct DirectoryWatcher {
     lanes_dir: PathBuf,
     config: Config,
-    lane_tx: mpsc::Sender<LaneMessage>,
+    turn_tx: mpsc::Sender<TurnReady>,
 }
 
 impl DirectoryWatcher {
-    pub fn new(lanes_dir: PathBuf, config: Config, lane_tx: mpsc::Sender<LaneMessage>) -> Self {
+    pub fn new(lanes_dir: PathBuf, config: Config, turn_tx: mpsc::Sender<TurnReady>) -> Self {
         Self {
             lanes_dir,
             config,
-            lane_tx,
+            turn_tx,
         }
     }
 
@@ -61,13 +63,18 @@ impl DirectoryWatcher {
         let lane_id = Self::lane_id_from_path(&path);
         debug!(lane = %lane_id, path = %path.display(), "New lane detected");
 
+        let idle_cfg = IdleCfg {
+            confirm_frames: self.config.daemon.idle_confirm_frames,
+            min_silence: Duration::from_millis(self.config.daemon.idle_min_silence_ms),
+            turn_max_duration: Duration::from_secs(self.config.daemon.turn_max_duration_secs),
+        };
+
         let mut lane_watcher = LaneWatcher::new(
             lane_id.clone(),
             path,
-            self.lane_tx.clone(),
-            &self.config.parsing.tool_pattern,
-            self.config.parsing.speakability_threshold,
-            self.config.queue.coalesce_window_ms,
+            self.turn_tx.clone(),
+            idle_cfg,
+            self.config.daemon.turn_buffer_max_bytes,
         );
 
         tokio::spawn(async move {
@@ -89,17 +96,5 @@ impl DirectoryWatcher {
         } else {
             stem.to_string()
         }
-    }
-
-    /// Resolve the voice name for a given lane ID, based on config rules + fallback.
-    pub fn voice_for_lane(&self, lane_id: &str) -> String {
-        // Check lane rules - match by directory suffix or rule name
-        for (dir, rule) in &self.config.lanes.rules {
-            if dir.ends_with(lane_id) || rule.name == lane_id {
-                return rule.voice.clone();
-            }
-        }
-        // Fallback to default voice
-        self.config.voice.default.clone()
     }
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
 
@@ -8,6 +8,12 @@ use std::path::PathBuf;
 enum Cli {
     /// Run the first-time setup wizard
     Init,
+    /// Change one slice of your setup (provider, voice, lane policy) without
+    /// overwriting the rest of the config
+    Configure {
+        #[command(subcommand)]
+        target: ConfigureTarget,
+    },
     /// Install shell hook and start the background daemon
     Enable,
     /// Remove shell hook and stop the daemon
@@ -30,6 +36,25 @@ enum Cli {
     Test { text: String },
 }
 
+#[derive(Subcommand)]
+enum ConfigureTarget {
+    /// Switch TTS provider, update API key, pick a new voice, and test
+    Tts,
+    /// Switch the liaison LLM (the layer that summarises each Claude turn
+    /// before it's spoken). Prompts for provider, API key, and model.
+    Liaison,
+    /// Pick a different voice from the current TTS provider
+    Voice,
+    /// Choose whether every lane shares one voice or each lane gets its own
+    LanePolicy,
+    /// Walk through TTS + liaison + voice + lane-policy in sequence
+    All,
+    /// Deprecated alias for `tts` — kept for one release to catch muscle
+    /// memory from v0.1.x. Prints a notice and delegates to `tts`.
+    #[command(hide = true)]
+    Provider,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -43,6 +68,7 @@ async fn main() -> Result<()> {
 
     match cli {
         Cli::Init => cmd_init().await?,
+        Cli::Configure { target } => cmd_configure(target).await?,
         Cli::Enable => cmd_enable().await?,
         Cli::Disable => cmd_disable()?,
         Cli::Status => cmd_status()?,
@@ -57,6 +83,24 @@ async fn main() -> Result<()> {
 
 async fn cmd_init() -> Result<()> {
     loquitor::wizard::run_wizard().await
+}
+
+async fn cmd_configure(target: ConfigureTarget) -> Result<()> {
+    match target {
+        ConfigureTarget::Tts => loquitor::wizard::configure_tts().await,
+        ConfigureTarget::Liaison => loquitor::wizard::configure_liaison().await,
+        ConfigureTarget::Voice => loquitor::wizard::configure_voice().await,
+        ConfigureTarget::LanePolicy => loquitor::wizard::configure_lane_policy().await,
+        ConfigureTarget::All => loquitor::wizard::configure_all().await,
+        ConfigureTarget::Provider => {
+            println!(
+                "{}",
+                "note: `configure provider` is deprecated — use `configure tts`."
+                    .yellow()
+            );
+            loquitor::wizard::configure_tts().await
+        }
+    }
 }
 
 async fn cmd_enable() -> Result<()> {
@@ -135,7 +179,7 @@ fn cmd_status() -> Result<()> {
             "not installed".red()
         }
     );
-    println!("  Provider: {}", cfg.provider.name.cyan());
+    println!("  Provider: {}", cfg.tts.name.cyan());
     Ok(())
 }
 
@@ -167,9 +211,9 @@ fn cmd_lane(id: String, name: Option<String>, voice: Option<String>) -> Result<(
 async fn cmd_voices() -> Result<()> {
     let cfg = loquitor::config::load()?;
     let provider = loquitor::tts::create_provider(
-        &cfg.provider.name,
-        &cfg.provider.api_key,
-        &cfg.provider.model,
+        &cfg.tts.name,
+        &cfg.tts.api_key,
+        &cfg.tts.model,
     )?;
     let voices = provider.list_voices().await?;
     if voices.is_empty() {
@@ -185,9 +229,9 @@ async fn cmd_voices() -> Result<()> {
 async fn cmd_test(text: String) -> Result<()> {
     let cfg = loquitor::config::load()?;
     let provider = loquitor::tts::create_provider(
-        &cfg.provider.name,
-        &cfg.provider.api_key,
-        &cfg.provider.model,
+        &cfg.tts.name,
+        &cfg.tts.api_key,
+        &cfg.tts.model,
     )?;
 
     println!("  Speaking: \"{text}\"");

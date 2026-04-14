@@ -1,45 +1,73 @@
-use super::parser::Parser;
+use super::idle::{self, IdleCfg, IdleState, LineClass, TurnEvent};
+use super::parser::strip_ansi;
 use crate::audio::LaneId;
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-/// Message emitted when the parser yields a speakable utterance.
-pub struct LaneMessage {
+/// Signal emitted by a LaneWatcher when it detects that Claude has
+/// finished its current turn and is waiting for user input. Consumed
+/// by the liaison worker (PR5), which calls the summarizer LLM and
+/// forwards a one-sentence notification to TTS.
+pub struct TurnReady {
     pub lane_id: LaneId,
-    pub text: String,
+    /// Full cleaned, ANSI-stripped terminal text for the turn. May be
+    /// prefixed with a truncation marker if the underlying buffer
+    /// overran `IdleCfg`'s bound and we dropped lines from the front.
+    pub turn_text: String,
+    pub started_at: Instant,
+    pub ended_at: Instant,
+    /// True if at least one line was dropped from the front due to the
+    /// byte cap being exceeded.
+    pub truncated: bool,
 }
 
-/// Watches a single log file and emits LaneMessages for speakable content.
-/// Tails from end-of-file — only processes lines written after the watcher starts.
+/// Watches a single log file. Cleans each incoming line, feeds the
+/// idle-detector state machine, and accumulates cleaned content into a
+/// bounded per-lane turn buffer. On `TurnEvent::TurnEnded` the buffer
+/// is flushed as a `TurnReady` event on `turn_tx`.
 pub struct LaneWatcher {
     lane_id: LaneId,
     file_path: PathBuf,
-    tx: mpsc::Sender<LaneMessage>,
-    parser: Parser,
-    coalesce_window: Duration,
+    turn_tx: mpsc::Sender<TurnReady>,
+    idle_state: IdleState,
+    idle_cfg: IdleCfg,
+    /// Maximum bytes of accumulated turn text. When exceeded, lines are
+    /// dropped from the front until the buffer is back under 80% of the
+    /// cap. A banner is added when flushed.
+    max_bytes: usize,
+    // --- per-turn mutable state ---
+    buffer: VecDeque<String>,
+    buffer_bytes: usize,
+    truncated: bool,
+    turn_started: Option<Instant>,
 }
 
 impl LaneWatcher {
     pub fn new(
         lane_id: LaneId,
         file_path: PathBuf,
-        tx: mpsc::Sender<LaneMessage>,
-        tool_pattern: &str,
-        speakability_threshold: f64,
-        coalesce_window_ms: u64,
+        turn_tx: mpsc::Sender<TurnReady>,
+        idle_cfg: IdleCfg,
+        max_bytes: usize,
     ) -> Self {
         Self {
             lane_id,
             file_path,
-            tx,
-            parser: Parser::new(tool_pattern, speakability_threshold),
-            coalesce_window: Duration::from_millis(coalesce_window_ms),
+            turn_tx,
+            idle_state: IdleState::new(),
+            idle_cfg,
+            max_bytes,
+            buffer: VecDeque::new(),
+            buffer_bytes: 0,
+            truncated: false,
+            turn_started: None,
         }
     }
 
@@ -50,7 +78,7 @@ impl LaneWatcher {
             "Lane watcher started"
         );
 
-        // Wait for file to appear (up to 5 seconds)
+        // Wait up to 5s for the file to appear.
         let mut attempts = 0;
         while !self.file_path.exists() {
             if attempts >= 50 {
@@ -65,53 +93,34 @@ impl LaneWatcher {
 
         let file = File::open(&self.file_path).await?;
         let mut reader = BufReader::new(file);
-
-        // Seek to end — only process new content
         reader.seek(SeekFrom::End(0)).await?;
 
         let poll_interval = Duration::from_millis(100);
-        let mut coalesce_buf: Vec<String> = Vec::new();
-        let mut last_content_time: Option<tokio::time::Instant> = None;
-        // Leftover bytes that are either pre-newline or a partial UTF-8 character at
-        // the end of the last read. Carry them across reads so we don't split a line
-        // or a multi-byte grapheme on an arbitrary buffer boundary.
         let mut leftover: Vec<u8> = Vec::new();
         let mut read_chunk = vec![0u8; 8192];
 
         loop {
-            // Read any available bytes
             let mut read_any = false;
             loop {
                 match reader.read(&mut read_chunk).await {
-                    Ok(0) => break, // No new data
+                    Ok(0) => break,
                     Ok(n) => {
                         read_any = true;
                         leftover.extend_from_slice(&read_chunk[..n]);
 
-                        // Split on LF or CR (either line separator). TUIs like
-                        // Claude Code use bare \r (carriage return) to redraw a line
-                        // in-place — if we only split on \n we'd concatenate the
-                        // redrawn chunks (narrative + status + prompt + box drawing)
-                        // into one mega-line that poisons the speakability filter.
-                        // Treating \r as a line break on its own splits each redraw
-                        // frame into its own logical line.
-                        while let Some(nl) = leftover
-                            .iter()
-                            .position(|&b| b == b'\n' || b == b'\r')
+                        while let Some(nl) =
+                            leftover.iter().position(|&b| b == b'\n' || b == b'\r')
                         {
                             let line_bytes: Vec<u8> = leftover.drain(..=nl).collect();
-                            // Lossy UTF-8 conversion so control-sequence bytes from `script`
-                            // captures don't kill the watcher — invalid sequences become U+FFFD
-                            // which the speakability filter drops cleanly.
-                            let line = String::from_utf8_lossy(&line_bytes);
-                            if let Some(text) = self.parser.parse_line(&line) {
-                                coalesce_buf.push(text);
-                                last_content_time = Some(tokio::time::Instant::now());
-                                debug!(
-                                    lane = %self.lane_id,
-                                    buffered = coalesce_buf.len(),
-                                    "Added to coalesce buffer"
-                                );
+                            let raw = String::from_utf8_lossy(&line_bytes);
+                            if let Some(event) = self.process_line(&raw) {
+                                if self.turn_tx.send(event).await.is_err() {
+                                    info!(
+                                        lane = %self.lane_id,
+                                        "Turn receiver dropped, lane watcher exiting"
+                                    );
+                                    return Ok(());
+                                }
                             }
                         }
                     }
@@ -122,41 +131,95 @@ impl LaneWatcher {
                 }
             }
 
-            // Decide whether to flush coalesce buffer
-            if !coalesce_buf.is_empty() {
-                if let Some(last_time) = last_content_time {
-                    let elapsed = last_time.elapsed();
-                    if elapsed >= self.coalesce_window {
-                        // Quiet window elapsed — flush
-                        let combined = coalesce_buf.join(" ");
-                        coalesce_buf.clear();
-                        last_content_time = None;
-
-                        debug!(
-                            lane = %self.lane_id,
-                            text = %combined,
-                            "Flushing coalesced utterance"
-                        );
-
-                        if self
-                            .tx
-                            .send(LaneMessage {
-                                lane_id: self.lane_id.clone(),
-                                text: combined,
-                            })
-                            .await
-                            .is_err()
-                        {
-                            info!(lane = %self.lane_id, "Receiver dropped, lane watcher exiting");
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-
-            // Sleep before next poll (unless we just read data and might have more)
             if !read_any {
                 sleep(poll_interval).await;
+            }
+        }
+    }
+
+    /// Apply one raw line to the watcher's state and optionally return a
+    /// `TurnReady` if this line closed a turn. Delegates to
+    /// `process_line_at(raw, Instant::now())` — the separate entry point
+    /// lets tests fabricate timestamps without sleeping.
+    pub fn process_line(&mut self, raw: &str) -> Option<TurnReady> {
+        self.process_line_at(raw, Instant::now())
+    }
+
+    /// Test-friendly variant: takes the current `Instant` as a parameter
+    /// so unit tests can walk synthetic timelines without real time.
+    pub fn process_line_at(&mut self, raw: &str, now: Instant) -> Option<TurnReady> {
+        let cleaned = strip_ansi(raw);
+        let class = idle::classify(&cleaned);
+
+        let is_content = matches!(class, LineClass::Content);
+        let starting_new_turn = is_content && matches!(self.idle_state, IdleState::Idle);
+
+        if starting_new_turn {
+            self.turn_started = Some(now);
+            // Defensive reset — should already be clean, but if the
+            // previous flush failed mid-way we want a fresh slate.
+            self.buffer.clear();
+            self.buffer_bytes = 0;
+            self.truncated = false;
+        }
+
+        // Prompt frames are TUI chrome — they don't belong in the text
+        // the LLM summarises. Skip them. Blank content lines are
+        // preserved because Claude uses them for paragraph breaks.
+        if is_content {
+            self.append_to_buffer(&cleaned);
+        }
+
+        let event = idle::feed(&mut self.idle_state, class, now, &self.idle_cfg);
+        // The rest of the body uses `now` instead of a second
+        // Instant::now() call so tests remain deterministic.
+
+        if event == Some(TurnEvent::TurnEnded) {
+            let started_at = self.turn_started.take().unwrap_or(now);
+            let truncated = self.truncated;
+            self.truncated = false;
+            let body: String = std::mem::take(&mut self.buffer).into_iter().collect();
+            self.buffer_bytes = 0;
+            let turn_text = if truncated {
+                format!("[earlier output truncated]\n{body}")
+            } else {
+                body
+            };
+            debug!(
+                lane = %self.lane_id,
+                bytes = turn_text.len(),
+                truncated,
+                "Turn flushing"
+            );
+            Some(TurnReady {
+                lane_id: self.lane_id.clone(),
+                turn_text,
+                started_at,
+                ended_at: now,
+                truncated,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Append one cleaned line to the buffer. When the resulting byte
+    /// total exceeds `max_bytes`, drop whole lines from the front until
+    /// we're back under 80% of the cap. Marks `truncated = true`.
+    fn append_to_buffer(&mut self, cleaned: &str) {
+        // Append a newline so the flushed text reconstructs readable
+        // line breaks for the LLM.
+        let line = format!("{cleaned}\n");
+        self.buffer_bytes += line.len();
+        self.buffer.push_back(line);
+
+        if self.buffer_bytes > self.max_bytes {
+            self.truncated = true;
+            let target = self.max_bytes * 8 / 10;
+            while self.buffer_bytes > target && self.buffer.len() > 1 {
+                if let Some(dropped) = self.buffer.pop_front() {
+                    self.buffer_bytes -= dropped.len();
+                }
             }
         }
     }
