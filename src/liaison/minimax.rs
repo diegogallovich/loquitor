@@ -12,7 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 const ENDPOINT: &str = "https://api.minimax.io/v1/text/chatcompletion_v2";
-const DEFAULT_MODEL: &str = "MiniMax-Text-01";
+const DEFAULT_MODEL: &str = "MiniMax-M2.7";
 
 pub struct MiniMaxProvider {
     inner: OpenAiProvider,

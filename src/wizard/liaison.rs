@@ -35,23 +35,30 @@ const PROVIDERS: &[ProviderDef] = &[
     ProviderDef {
         id: "openai",
         display: "OpenAI",
-        blurb: "Wide model range from mini to reasoning models.",
+        blurb: "GPT-5.4 family: pro → nano, plus fallback mini-class models.",
         key_url: "https://platform.openai.com/api-keys",
+        // Current as of April 2026. The pro tier is overkill for a
+        // one-sentence summary but included for users who want it.
+        // gpt-5.4-mini is the recommended balance for this workload.
         models: &[
-            "gpt-4o",
+            "gpt-5.4-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
             "gpt-4o-mini",
-            "gpt-4-turbo",
-            "o3-mini",
         ],
     },
     ProviderDef {
         id: "minimax",
         display: "MiniMax",
-        blurb: "Reuse your MiniMax TTS key. Chat API is OpenAI-shaped.",
+        blurb: "M2 series. Reuse your MiniMax TTS key; chat API is OpenAI-shaped.",
         key_url: "https://www.minimax.io/platform",
+        // M2.7 is current flagship (April 2026); M2.5 and M2 are still
+        // available as cheaper fallbacks.
         models: &[
-            "MiniMax-Text-01",
-            "MiniMax-M1",
+            "MiniMax-M2.7",
+            "MiniMax-M2.5",
+            "MiniMax-M2",
         ],
     },
 ];

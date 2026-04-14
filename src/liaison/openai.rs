@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 const DEFAULT_ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL: &str = "gpt-4o-mini";
+const DEFAULT_MODEL: &str = "gpt-5.4-mini";
 
 pub struct OpenAiProvider {
     client: reqwest::Client,
