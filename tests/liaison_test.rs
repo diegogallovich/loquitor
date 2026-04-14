@@ -120,6 +120,18 @@ fn create_provider_builds_anthropic() {
 }
 
 #[test]
+fn create_provider_builds_openai() {
+    let p = create_provider("openai", "fake", "gpt-4o-mini").unwrap();
+    assert_eq!(p.name(), "openai");
+}
+
+#[test]
+fn create_provider_builds_minimax() {
+    let p = create_provider("minimax", "fake", "MiniMax-Text-01").unwrap();
+    assert_eq!(p.name(), "minimax");
+}
+
+#[test]
 fn create_provider_rejects_unknown() {
     // Using `.err().unwrap()` because `Box<dyn LiaisonProvider>` doesn't
     // implement Debug (required by `.unwrap_err()`).

@@ -5,6 +5,8 @@
 //! factory driven by config.
 
 pub mod anthropic;
+pub mod minimax;
+pub mod openai;
 pub mod prompt;
 pub mod scrub;
 
@@ -71,6 +73,8 @@ pub fn create_provider(
 ) -> Result<Box<dyn LiaisonProvider>> {
     match name {
         "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(api_key, model))),
+        "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model))),
+        "minimax" => Ok(Box::new(minimax::MiniMaxProvider::new(api_key, model))),
         other => anyhow::bail!("Unknown liaison provider: {other}"),
     }
 }

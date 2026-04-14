@@ -10,15 +10,31 @@ use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Password, Select};
 
 /// Each tuple is (id, display name, one-line description, default model,
-/// default base_url). Only the `anthropic` row is live in PR2; the rest
-/// ship with PR6 and will be added to this array in that PR.
-const PROVIDERS: &[(&str, &str, &str, &str, &str)] = &[(
-    "anthropic",
-    "Anthropic (Claude Haiku 4.5)",
-    "Fast, cheap (~$3/yr at 50 turns/day), recommended default",
-    "claude-haiku-4-5",
-    "",
-)];
+/// default base_url). Google Gemini and a generic openai_compat adapter
+/// (xAI / Groq / Mistral / DeepSeek / Ollama) arrive in PR6.
+const PROVIDERS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "anthropic",
+        "Anthropic (Claude Haiku 4.5)",
+        "Fast + cheap (~$3/yr at 50 turns/day), recommended default",
+        "claude-haiku-4-5",
+        "",
+    ),
+    (
+        "openai",
+        "OpenAI (GPT-4o mini)",
+        "Comparable cost to Haiku, same TTS vendor if you already use OpenAI",
+        "gpt-4o-mini",
+        "",
+    ),
+    (
+        "minimax",
+        "MiniMax (MiniMax-Text-01)",
+        "Reuse your MiniMax TTS key; chat API is OpenAI-shaped",
+        "MiniMax-Text-01",
+        "",
+    ),
+];
 
 pub fn select_liaison(current: Option<&LiaisonConfig>) -> Result<LiaisonConfig> {
     let items: Vec<String> = PROVIDERS
@@ -64,6 +80,8 @@ pub fn select_liaison(current: Option<&LiaisonConfig>) -> Result<LiaisonConfig> 
 fn prompt_new_key(provider_id: &str) -> Result<String> {
     let key_url = match provider_id {
         "anthropic" => "https://console.anthropic.com/settings/keys",
+        "openai" => "https://platform.openai.com/api-keys",
+        "minimax" => "https://www.minimax.io/platform",
         _ => "",
     };
 
