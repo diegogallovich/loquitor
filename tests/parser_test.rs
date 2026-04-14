@@ -186,3 +186,78 @@ fn test_multiple_narrative_lines_in_sequence() {
     );
     assert_eq!(line3, Some("Let me fix that.".into()));
 }
+
+// --- Multi-line narrative block tests (the streamed-response bug fix) ---
+//
+// Claude Code often emits multi-line responses where only the FIRST line has
+// the ⏺ marker; continuation lines are bare prose. The parser stays inside
+// the narrative block so continuations speak too.
+
+/// Core bug-fix test: a streamed multi-line response speaks every speakable
+/// continuation line, not just the first. Passes for any reasonable exit
+/// policy — none of these lines should trigger a close.
+#[test]
+fn test_streamed_multi_line_narrative_all_lines_emit() {
+    let mut parser = make_parser();
+    let line1 = parser.parse_line("⏺ Here's my plan for the refactor.");
+    let line2 = parser.parse_line("First, I'll extract the resolver.");
+    let line3 = parser.parse_line("Then I'll wire it into the worker loop.");
+    assert_eq!(line1, Some("Here's my plan for the refactor.".into()));
+    assert_eq!(
+        line2,
+        Some("First, I'll extract the resolver.".into()),
+        "continuation lines without a ⏺ marker must still be spoken while in a narrative block"
+    );
+    assert_eq!(line3, Some("Then I'll wire it into the worker loop.".into()));
+}
+
+/// A new narrative marker mid-block keeps the block open (idempotent).
+#[test]
+fn test_narrative_marker_mid_block_stays_narrative() {
+    let mut parser = make_parser();
+    parser.parse_line("⏺ First thought.");
+    let line = parser.parse_line("⏺ Second thought on its own.");
+    assert_eq!(line, Some("Second thought on its own.".into()));
+}
+
+// --- Exit-policy contract tests (`should_exit_narrative` impl) ---
+//
+// These currently FAIL because the stub returns `false`. They pass once
+// the exit policy closes blocks on tool signals.
+
+/// A tool-call marker (coloured ⏺) closes the block. Bare prose after the
+/// close is NOT spoken until a new narrative marker reopens.
+#[test]
+fn test_narrative_closes_on_tool_call_marker() {
+    let mut parser = make_parser();
+    parser.parse_line("⏺ Let me check the config.");
+    parser.parse_line("\x1b[34m⏺\x1b[0m Read(config.toml)");
+    let after = parser.parse_line("totally reasonable english prose here.");
+    assert_eq!(
+        after, None,
+        "narrative must close on tool-call marker — otherwise tool output narrates"
+    );
+}
+
+/// Bare `Bash(cargo test)` text (colour upstream-stripped) also closes the block.
+#[test]
+fn test_narrative_closes_on_bare_tool_call_text() {
+    let mut parser = make_parser();
+    parser.parse_line("⏺ Running the tests.");
+    parser.parse_line("⏺ Bash(cargo test)");
+    let after = parser.parse_line("this should not be spoken.");
+    assert_eq!(
+        after, None,
+        "narrative must close when cleaned text matches a tool regex"
+    );
+}
+
+/// A new narrative marker after a tool call reopens the block cleanly.
+#[test]
+fn test_narrative_reopens_after_tool_call() {
+    let mut parser = make_parser();
+    parser.parse_line("⏺ First observation.");
+    parser.parse_line("\x1b[34m⏺\x1b[0m Read(config.toml)");
+    let line = parser.parse_line("⏺ Now I have the config.");
+    assert_eq!(line, Some("Now I have the config.".into()));
+}

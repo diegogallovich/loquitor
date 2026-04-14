@@ -4,6 +4,13 @@ pub struct Parser {
     tool_pattern: Regex,
     speakability_threshold: f64,
     in_code_block: bool,
+    /// Tracks whether we're currently *inside* a narrative block.
+    /// A narrative block opens when a black/default ⏺ is seen and closes
+    /// when `should_exit_narrative` returns `true` for the current line.
+    /// While inside the block, continuation lines without a ⏺ marker are
+    /// still emitted (subject to the speakability filter) — this is what
+    /// makes multi-line prose and bulleted lists speak in full.
+    in_narrative_block: bool,
 }
 
 impl Parser {
@@ -15,6 +22,7 @@ impl Parser {
             }),
             speakability_threshold,
             in_code_block: false,
+            in_narrative_block: false,
         }
     }
 
@@ -47,6 +55,14 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Returns true iff the raw line contains a ⏺ marker whose colour is *not*
+    /// the narrative (black/default) palette. These are tool-call markers —
+    /// seeing one mid-narrative is a strong signal that the narrative block
+    /// has ended and a tool call is starting.
+    pub fn is_tool_marker(raw_line: &str) -> bool {
+        raw_line.contains('⏺') && !Self::is_narrative_marker(raw_line)
     }
 
     /// Decide if an SGR parameter string (e.g. "38;2;0;0;0" or "1;30") sets the
@@ -199,18 +215,53 @@ impl Parser {
         self.tool_pattern.is_match(content)
     }
 
+    /// DESIGN DECISION — Diego to implement.
+    ///
+    /// Called for every line *while a narrative block is already open*.
+    /// Return `true` to CLOSE the block. After closing, lines without a
+    /// fresh black ⏺ marker will be skipped until a new narrative block opens.
+    ///
+    /// Inputs describe the current raw line:
+    ///   - `has_tool_marker`   — raw line has a coloured ⏺ (tool call starting)
+    ///   - `is_tool_call_text` — cleaned text matches `Bash(...)`, `Read(...)` etc.
+    ///                           (tool call that somehow lacks a marker; belt-and-suspenders)
+    ///   - `is_speakable`      — cleaned text passed the speakability filter
+    ///                           (letters/punctuation ratio, not a code fence, not a path)
+    ///   - `is_empty`          — cleaned text is empty after trimming
+    ///
+    /// Trade-offs:
+    ///   - **Too aggressive** (e.g., exit on any non-speakable line) → you lose
+    ///     bulleted lists that have blank lines or ASCII between prose items.
+    ///   - **Too lenient** (e.g., never exit) → mild over-speaking: box drawings
+    ///     and status bars after Claude finishes talking would get probed by
+    ///     `is_speakable`. Usually harmless but not free.
+    ///
+    /// **My recommendation**: `has_tool_marker || is_tool_call_text`.
+    ///   Rationale — those are the only two signals that *reliably* mean
+    ///   "Claude just started doing something that isn't prose." Everything
+    ///   else (blank lines, code blocks, box drawings) is either transient
+    ///   formatting or already silently skipped by the speakability filter.
+    ///
+    /// But you've seen Claude Code's actual output shapes — your call.
+    fn should_exit_narrative(
+        has_tool_marker: bool,
+        is_tool_call_text: bool,
+        is_speakable: bool,
+        is_empty: bool,
+    ) -> bool {
+        // TODO(diego): implement the exit policy. 5-10 lines.
+        // While this returns `false`, the narrative block never closes —
+        // which fixes the "first line only" bug but may over-speak until
+        // you define the exit conditions.
+        let _ = (has_tool_marker, is_tool_call_text, is_speakable, is_empty);
+        false
+    }
+
     /// Run the complete pipeline on a raw line from `script` output.
     /// Returns `Some(speakable_text)` if the line should be spoken, or `None` if it should be skipped.
     pub fn parse_line(&mut self, raw_line: &str) -> Option<String> {
-        // Stage 1: Color-aware ⏺ detection
-        if !Self::is_narrative_marker(raw_line) {
-            return None;
-        }
-
-        // Stage 2: Strip ANSI
+        // Extract the cleaned text once — downstream checks need it.
         let clean = Self::strip_ansi(raw_line);
-
-        // Extract text after ⏺
         let text = clean
             .trim()
             .strip_prefix('⏺')
@@ -218,17 +269,34 @@ impl Parser {
             .trim()
             .to_string();
 
-        if text.is_empty() {
+        let is_empty = text.is_empty();
+        let tool_call_text = !is_empty && self.is_tool_call(&text);
+        // is_speakable mutates in_code_block, so only call it once per line.
+        let speakable = if is_empty { false } else { self.is_speakable(&text) };
+
+        let has_narrative = Self::is_narrative_marker(raw_line);
+        let has_tool_marker = Self::is_tool_marker(raw_line);
+
+        // --- State transitions ---
+        // A narrative marker always opens (or re-opens) a block.
+        if has_narrative {
+            self.in_narrative_block = true;
+        } else if self.in_narrative_block
+            && Self::should_exit_narrative(has_tool_marker, tool_call_text, speakable, is_empty)
+        {
+            self.in_narrative_block = false;
+        }
+
+        // --- Emission gate ---
+        // Outside a narrative block, silence.
+        if !self.in_narrative_block {
             return None;
         }
 
-        // Stage 5: Tool name safety net (run before speakability — reject tool calls early)
-        if self.is_tool_call(&text) {
-            return None;
-        }
-
-        // Stage 4: Speakability filter
-        if !self.is_speakable(&text) {
+        // Inside a narrative block, emit only truly speakable prose.
+        // Empty, tool-call text, and non-speakable lines are kept silent but
+        // the block stays open — subsequent speakable lines will still flow.
+        if is_empty || tool_call_text || !speakable {
             return None;
         }
 

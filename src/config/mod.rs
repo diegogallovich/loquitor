@@ -2,7 +2,7 @@ pub mod types;
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use types::Config;
+use types::{Config, VoiceMode};
 
 /// Return the config directory for Loquitor.
 ///
@@ -51,4 +51,30 @@ pub fn save(config: &Config) -> Result<()> {
     std::fs::write(&path, content)
         .with_context(|| format!("Failed to write config to {}", path.display()))?;
     Ok(())
+}
+
+/// Resolve the voice a lane should speak with.
+/// Under `Shared` mode, always returns `voice.default`.
+/// Under `PerLane` mode, returns the matching rule's voice or falls back to default.
+pub fn resolve_voice(cfg: &Config, lane_id: &str) -> String {
+    if cfg.voice.mode == VoiceMode::Shared {
+        return cfg.voice.default.clone();
+    }
+    cfg.lanes
+        .rules
+        .get(lane_id)
+        .map(|r| r.voice.clone())
+        .unwrap_or_else(|| cfg.voice.default.clone())
+}
+
+/// Resolve the human-readable name for a lane.
+/// Prefers the rule's `name` when non-empty; otherwise uses the lane_id itself
+/// (which is the cwd basename, already human-readable in the common case).
+pub fn resolve_lane_name(cfg: &Config, lane_id: &str) -> String {
+    cfg.lanes
+        .rules
+        .get(lane_id)
+        .map(|r| r.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| lane_id.to_string())
 }

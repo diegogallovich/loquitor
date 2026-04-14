@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
 
@@ -8,6 +8,12 @@ use std::path::PathBuf;
 enum Cli {
     /// Run the first-time setup wizard
     Init,
+    /// Change one slice of your setup (provider, voice, lane policy) without
+    /// overwriting the rest of the config
+    Configure {
+        #[command(subcommand)]
+        target: ConfigureTarget,
+    },
     /// Install shell hook and start the background daemon
     Enable,
     /// Remove shell hook and stop the daemon
@@ -30,6 +36,18 @@ enum Cli {
     Test { text: String },
 }
 
+#[derive(Subcommand)]
+enum ConfigureTarget {
+    /// Switch TTS provider, update API key, pick a new voice, and test
+    Provider,
+    /// Pick a different voice from the current provider
+    Voice,
+    /// Choose whether every lane shares one voice or each lane gets its own
+    LanePolicy,
+    /// Walk through provider + voice + lane-policy in sequence
+    All,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -43,6 +61,7 @@ async fn main() -> Result<()> {
 
     match cli {
         Cli::Init => cmd_init().await?,
+        Cli::Configure { target } => cmd_configure(target).await?,
         Cli::Enable => cmd_enable().await?,
         Cli::Disable => cmd_disable()?,
         Cli::Status => cmd_status()?,
@@ -57,6 +76,15 @@ async fn main() -> Result<()> {
 
 async fn cmd_init() -> Result<()> {
     loquitor::wizard::run_wizard().await
+}
+
+async fn cmd_configure(target: ConfigureTarget) -> Result<()> {
+    match target {
+        ConfigureTarget::Provider => loquitor::wizard::configure_provider().await,
+        ConfigureTarget::Voice => loquitor::wizard::configure_voice().await,
+        ConfigureTarget::LanePolicy => loquitor::wizard::configure_lane_policy().await,
+        ConfigureTarget::All => loquitor::wizard::configure_all().await,
+    }
 }
 
 async fn cmd_enable() -> Result<()> {

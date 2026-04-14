@@ -90,16 +90,4 @@ impl DirectoryWatcher {
             stem.to_string()
         }
     }
-
-    /// Resolve the voice name for a given lane ID, based on config rules + fallback.
-    pub fn voice_for_lane(&self, lane_id: &str) -> String {
-        // Check lane rules - match by directory suffix or rule name
-        for (dir, rule) in &self.config.lanes.rules {
-            if dir.ends_with(lane_id) || rule.name == lane_id {
-                return rule.voice.clone();
-            }
-        }
-        // Fallback to default voice
-        self.config.voice.default.clone()
-    }
 }
