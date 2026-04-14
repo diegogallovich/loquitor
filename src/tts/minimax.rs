@@ -24,26 +24,63 @@ impl MiniMaxProvider {
 }
 
 /// MiniMax voices per their public documentation.
-/// MiniMax doesn't expose a voices API endpoint — this list is static.
+/// MiniMax doesn't expose a voices API endpoint — this list is curated.
+/// English-native voices are listed first because English is Loquitor's
+/// dominant use case (narrating Claude Code sessions).
 const MINIMAX_VOICES: &[(&str, &str, &str)] = &[
-    ("male-qn-qingse", "Qingse", "young male, clear"),
-    ("female-shaonv", "Shaonv", "young female, bright"),
-    ("male-qn-jingying", "Jingying", "male, professional"),
-    ("female-yujie", "Yujie", "female, mature"),
-    ("male-qn-badao", "Badao", "male, dominant"),
-    ("female-chengshu", "Chengshu", "female, wise"),
-    ("female-tianmei", "Tianmei", "female, sweet"),
-    ("presenter_male", "Presenter Male", "presenter, male"),
-    ("presenter_female", "Presenter Female", "presenter, female"),
+    // --- English-native voices (recommended for English agent output) ---
+    (
+        "English_Graceful_Lady",
+        "Graceful Lady (English)",
+        "English, warm and measured",
+    ),
+    (
+        "English_Insightful_Speaker",
+        "Insightful Speaker (English)",
+        "English, confident male",
+    ),
+    (
+        "English_radiant_girl",
+        "Radiant Girl (English)",
+        "English, bright female",
+    ),
+    (
+        "English_Persuasive_Man",
+        "Persuasive Man (English)",
+        "English, authoritative male",
+    ),
+    (
+        "English_Lucky_Robot",
+        "Lucky Robot (English)",
+        "English, quirky robotic",
+    ),
+    // --- Chinese-native voices (use only for Chinese text) ---
+    ("male-qn-qingse", "Qingse (中文)", "Chinese, young male"),
+    ("female-shaonv", "Shaonv (中文)", "Chinese, young female"),
+    (
+        "male-qn-jingying",
+        "Jingying (中文)",
+        "Chinese, male professional",
+    ),
+    ("female-yujie", "Yujie (中文)", "Chinese, female mature"),
+    ("male-qn-badao", "Badao (中文)", "Chinese, male dominant"),
+    ("female-chengshu", "Chengshu (中文)", "Chinese, female wise"),
+    ("female-tianmei", "Tianmei (中文)", "Chinese, female sweet"),
+    ("presenter_male", "Presenter Male (中文)", "Chinese, presenter"),
+    (
+        "presenter_female",
+        "Presenter Female (中文)",
+        "Chinese, presenter",
+    ),
     (
         "audiobook_male_1",
-        "Audiobook Male 1",
-        "audiobook narrator, male",
+        "Audiobook Male (中文)",
+        "Chinese, audiobook narrator",
     ),
     (
         "audiobook_female_1",
-        "Audiobook Female 1",
-        "audiobook narrator, female",
+        "Audiobook Female (中文)",
+        "Chinese, audiobook narrator",
     ),
 ];
 
@@ -65,6 +102,9 @@ impl TtsProvider for MiniMaxProvider {
     }
 
     async fn synthesize(&self, text: &str, voice: &VoiceId) -> Result<AudioData> {
+        // `language_boost: "auto"` lets MiniMax detect the input language and
+        // synthesize natively instead of phonetically approximating through
+        // Chinese syllables. Critical for English text on any of their voices.
         let body = serde_json::json!({
             "model": self.model,
             "text": text,
@@ -75,6 +115,7 @@ impl TtsProvider for MiniMaxProvider {
                 "format": "mp3",
                 "sample_rate": 32000,
             },
+            "language_boost": "auto",
         });
 
         let response = self
