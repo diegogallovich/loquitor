@@ -127,13 +127,13 @@ export default function Home() {
         <div>
           <span style={{ color: "var(--term-green)" }}>$</span> loquitor init
           <span style={{ color: "var(--term-muted)" }}>
-            {"  "}# Pick TTS + summary LLM, models, voice
+            {"    "}# Pick TTS + summary LLM, models, voice
           </span>
         </div>
         <div>
           <span style={{ color: "var(--term-green)" }}>$</span> loquitor enable
           <span style={{ color: "var(--term-muted)" }}>
-            {" "}# Install shell hook + start daemon
+            {"  "}# Install shell hook + start daemon
           </span>
         </div>
         <div style={{ color: "var(--term-muted)", marginTop: "4px" }}>
@@ -197,7 +197,7 @@ export default function Home() {
           </a>
         </div>
         <div style={{ color: "var(--term-muted)" }}>
-          {"   "}Issues · Pull Requests · Discussions
+          {"  "}Issues · Pull Requests · Discussions
         </div>
 
         <br />
