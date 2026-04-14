@@ -2,7 +2,7 @@
 //! keep) the API key, pick (or type) a model. Symmetric with
 //! `wizard/provider.rs` for TTS.
 
-use crate::config::types::LiaisonConfig;
+use crate::config::types::{LiaisonConfig, TtsConfig};
 use anyhow::Result;
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Input, Password, Select};
@@ -65,11 +65,14 @@ const PROVIDERS: &[ProviderDef] = &[
 
 const CUSTOM_MODEL_LABEL: &str = "Custom model id…";
 
-pub fn select_liaison(current: Option<&LiaisonConfig>) -> Result<LiaisonConfig> {
+pub fn select_liaison(
+    current: Option<&LiaisonConfig>,
+    tts: Option<&TtsConfig>,
+) -> Result<LiaisonConfig> {
     let provider_idx = select_provider_index(current)?;
     let provider = &PROVIDERS[provider_idx];
 
-    let api_key = resolve_api_key(provider, current)?;
+    let api_key = resolve_api_key(provider, current, tts)?;
     let model = select_model(provider, current.map(|c| c.model.as_str()))?;
 
     Ok(LiaisonConfig {
@@ -103,14 +106,61 @@ fn select_provider_index(current: Option<&LiaisonConfig>) -> Result<usize> {
     Ok(selection)
 }
 
-fn resolve_api_key(provider: &ProviderDef, current: Option<&LiaisonConfig>) -> Result<String> {
-    let reuse_existing = current
-        .filter(|c| c.name == provider.id && !c.api_key.is_empty())
-        .is_some();
-    if reuse_existing {
-        prompt_key_reuse(provider, current.unwrap())
-    } else {
-        prompt_new_key(provider)
+/// Resolve the API key for the chosen liaison provider. Offers up to
+/// three sources in a Select menu, ordered by relevance:
+///
+///   1. Keep the key already in the liaison config (if it matches the
+///      chosen provider and is non-empty).
+///   2. Reuse the TTS key, if the TTS provider id matches the liaison
+///      provider id and has a non-empty key. Same account, same key —
+///      OpenAI TTS and OpenAI Chat are one account in one dashboard.
+///   3. Enter a fresh key.
+///
+/// If only option (3) is available, the prompt goes straight there —
+/// no menu needed.
+fn resolve_api_key(
+    provider: &ProviderDef,
+    current: Option<&LiaisonConfig>,
+    tts: Option<&TtsConfig>,
+) -> Result<String> {
+    let mut options: Vec<(String, Option<String>)> = Vec::new();
+
+    if let Some(existing) = current.filter(|c| c.name == provider.id && !c.api_key.is_empty()) {
+        options.push((
+            format!("Keep the existing {} key", provider.id),
+            Some(existing.api_key.clone()),
+        ));
+    }
+    if let Some(tts_cfg) = tts.filter(|t| t.name == provider.id && !t.api_key.is_empty()) {
+        // Avoid duplicating the option if the TTS key and the current
+        // liaison key happen to be identical (common when configure_liaison
+        // is re-run after configure_tts set the same key).
+        let already_listed = options.iter().any(|(_, v)| v.as_deref() == Some(&tts_cfg.api_key));
+        if !already_listed {
+            options.push((
+                format!("Reuse your {} TTS key (same account)", provider.id),
+                Some(tts_cfg.api_key.clone()),
+            ));
+        }
+    }
+    options.push(("Enter a new key".to_string(), None));
+
+    if options.len() == 1 {
+        // Only "enter new" — skip the menu.
+        return prompt_new_key(provider);
+    }
+
+    println!();
+    let labels: Vec<String> = options.iter().map(|(l, _)| l.clone()).collect();
+    let choice = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!("API key for {}", provider.id))
+        .items(&labels)
+        .default(0)
+        .interact()?;
+
+    match &options[choice].1 {
+        Some(key) => Ok(key.clone()),
+        None => prompt_new_key(provider),
     }
 }
 
@@ -185,25 +235,3 @@ fn prompt_new_key(provider: &ProviderDef) -> Result<String> {
     Ok(api_key)
 }
 
-fn prompt_key_reuse(provider: &ProviderDef, current: &LiaisonConfig) -> Result<String> {
-    println!();
-    println!(
-        "  {} {}",
-        "Existing API key on file for".dimmed(),
-        provider.id.cyan()
-    );
-    println!();
-
-    let options = ["Keep the existing key", "Enter a new key"];
-    let choice = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("API key")
-        .items(&options)
-        .default(0)
-        .interact()?;
-
-    if choice == 0 {
-        Ok(current.api_key.clone())
-    } else {
-        prompt_new_key(provider)
-    }
-}

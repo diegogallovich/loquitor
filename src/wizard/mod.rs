@@ -26,8 +26,11 @@ pub async fn run_wizard() -> Result<()> {
     // Step 2: TTS provider selection (+ API key if cloud provider)
     let tts_config = provider::select_provider(existing_tts)?;
 
-    // Step 3: Liaison (summary LLM) provider selection
-    let liaison_config = liaison::select_liaison(existing_liaison)?;
+    // Step 3: Liaison (summary LLM) provider selection. Pass the
+    // freshly-chosen TTS config so the wizard can offer to reuse the
+    // same key when both sides pick the same provider (OpenAI TTS +
+    // OpenAI liaison = one account, one key).
+    let liaison_config = liaison::select_liaison(existing_liaison, Some(&tts_config))?;
 
     // Instantiate the TTS provider so we can list voices and run the audio test.
     // The liaison provider isn't instantiated here — it'll be exercised end-to-end
@@ -113,7 +116,7 @@ pub async fn configure_tts() -> Result<()> {
 /// and an OpenAI-compatible adapter.
 pub async fn configure_liaison() -> Result<()> {
     let mut cfg = config::load()?;
-    let new_liaison = liaison::select_liaison(Some(&cfg.liaison))?;
+    let new_liaison = liaison::select_liaison(Some(&cfg.liaison), Some(&cfg.tts))?;
     cfg.liaison = new_liaison;
     config::save(&cfg)?;
     println!();
