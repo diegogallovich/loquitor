@@ -17,19 +17,22 @@ fn make_watcher(max_bytes: usize) -> LaneWatcher {
         turn_max_duration: Duration::from_secs(3600),
     };
     let (tx, _rx) = mpsc::channel::<TurnReady>(16);
-    LaneWatcher::new("test-lane".into(), "/tmp/nowhere.log".into(), tx, idle_cfg, max_bytes)
+    LaneWatcher::new(
+        "test-lane".into(),
+        "/tmp/nowhere.log".into(),
+        tx,
+        idle_cfg,
+        max_bytes,
+    )
 }
 
 /// Drive a sequence of (line, Instant-offset-ms) pairs through the
 /// watcher and return every TurnReady that fires.
-fn drive(
-    watcher: &mut LaneWatcher,
-    origin: Instant,
-    seq: &[(&str, u64)],
-) -> Vec<TurnReady> {
+fn drive(watcher: &mut LaneWatcher, origin: Instant, seq: &[(&str, u64)]) -> Vec<TurnReady> {
     let mut out = Vec::new();
     for (line, offset_ms) in seq {
-        if let Some(ready) = watcher.process_line_at(line, origin + Duration::from_millis(*offset_ms))
+        if let Some(ready) =
+            watcher.process_line_at(line, origin + Duration::from_millis(*offset_ms))
         {
             out.push(ready);
         }
@@ -182,11 +185,7 @@ fn sequential_turns_buffer_clean_between_flushes() {
     let r1 = drive(
         &mut w,
         t0,
-        &[
-            ("First turn line.\n", 0),
-            ("╭─╮", 10),
-            ("╭─╮", 20),
-        ],
+        &[("First turn line.\n", 0), ("╭─╮", 10), ("╭─╮", 20)],
     );
     assert_eq!(r1.len(), 1);
     assert!(r1[0].turn_text.contains("First turn line."));
@@ -195,11 +194,7 @@ fn sequential_turns_buffer_clean_between_flushes() {
     let r2 = drive(
         &mut w,
         t0,
-        &[
-            ("Second turn content.\n", 100),
-            ("╭─╮", 110),
-            ("╭─╮", 120),
-        ],
+        &[("Second turn content.\n", 100), ("╭─╮", 110), ("╭─╮", 120)],
     );
     assert_eq!(r2.len(), 1);
     assert!(r2[0].turn_text.contains("Second turn content."));

@@ -68,9 +68,8 @@ fn fake_turn(lane: &str, text: &str) -> TurnReady {
 #[tokio::test]
 async fn prepends_lane_announcement_deterministically() {
     let cfg = Config::default();
-    let provider = MockLiaisonProvider::with_success(
-        "Finished the refactor. Waiting for you to review.",
-    );
+    let provider =
+        MockLiaisonProvider::with_success("Finished the refactor. Waiting for you to review.");
     let turn = fake_turn("loquitor", "some terminal output");
 
     let out = handle_turn(turn, &cfg, &provider).await;
@@ -134,7 +133,8 @@ async fn failure_produces_canned_fallback_with_lane_prefix() {
 
     let out = handle_turn(turn, &cfg, &provider).await;
     assert!(
-        out.text.starts_with("Regarding my-project. Summary unavailable —"),
+        out.text
+            .starts_with("Regarding my-project. Summary unavailable —"),
         "fallback shape wrong: {}",
         out.text
     );
@@ -148,8 +148,7 @@ async fn failure_produces_canned_fallback_with_lane_prefix() {
 #[tokio::test]
 async fn timeout_error_classifies_as_timeout() {
     let cfg = Config::default();
-    let provider =
-        MockLiaisonProvider::with_error(anyhow!("request timed out after 15 seconds"));
+    let provider = MockLiaisonProvider::with_error(anyhow!("request timed out after 15 seconds"));
     let turn = fake_turn("lane", "x");
 
     let out = handle_turn(turn, &cfg, &provider).await;
@@ -169,8 +168,7 @@ async fn rate_limit_error_classifies_as_rate_limit() {
 #[tokio::test]
 async fn network_error_classifies_as_network() {
     let cfg = Config::default();
-    let provider =
-        MockLiaisonProvider::with_error(anyhow!("connection refused by 54.x.x.x"));
+    let provider = MockLiaisonProvider::with_error(anyhow!("connection refused by 54.x.x.x"));
     let turn = fake_turn("lane", "x");
 
     let out = handle_turn(turn, &cfg, &provider).await;
@@ -181,19 +179,31 @@ async fn network_error_classifies_as_network() {
 
 #[test]
 fn classify_authentication_variants() {
-    assert_eq!(classify_error(&anyhow!("HTTP 401 Unauthorized")), "authentication error");
-    assert_eq!(classify_error(&anyhow!("authentication failed")), "authentication error");
+    assert_eq!(
+        classify_error(&anyhow!("HTTP 401 Unauthorized")),
+        "authentication error"
+    );
+    assert_eq!(
+        classify_error(&anyhow!("authentication failed")),
+        "authentication error"
+    );
 }
 
 #[test]
 fn classify_5xx_is_provider_outage() {
     assert_eq!(classify_error(&anyhow!("HTTP 503")), "a provider outage");
-    assert_eq!(classify_error(&anyhow!("received 502 Bad Gateway")), "a provider outage");
+    assert_eq!(
+        classify_error(&anyhow!("received 502 Bad Gateway")),
+        "a provider outage"
+    );
 }
 
 #[test]
 fn classify_unknown_falls_back() {
-    assert_eq!(classify_error(&anyhow!("some weird failure")), "an unknown error");
+    assert_eq!(
+        classify_error(&anyhow!("some weird failure")),
+        "an unknown error"
+    );
 }
 
 // --- should_scrub policy ---

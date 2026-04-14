@@ -95,8 +95,7 @@ async fn cmd_configure(target: ConfigureTarget) -> Result<()> {
         ConfigureTarget::Provider => {
             println!(
                 "{}",
-                "note: `configure provider` is deprecated — use `configure tts`."
-                    .yellow()
+                "note: `configure provider` is deprecated — use `configure tts`.".yellow()
             );
             loquitor::wizard::configure_tts().await
         }
@@ -210,11 +209,7 @@ fn cmd_lane(id: String, name: Option<String>, voice: Option<String>) -> Result<(
 
 async fn cmd_voices() -> Result<()> {
     let cfg = loquitor::config::load()?;
-    let provider = loquitor::tts::create_provider(
-        &cfg.tts.name,
-        &cfg.tts.api_key,
-        &cfg.tts.model,
-    )?;
+    let provider = loquitor::tts::create_provider(&cfg.tts.name, &cfg.tts.api_key, &cfg.tts.model)?;
     let voices = provider.list_voices().await?;
     if voices.is_empty() {
         println!("{}", "  (provider returned no voices)".dimmed());
@@ -228,11 +223,7 @@ async fn cmd_voices() -> Result<()> {
 
 async fn cmd_test(text: String) -> Result<()> {
     let cfg = loquitor::config::load()?;
-    let provider = loquitor::tts::create_provider(
-        &cfg.tts.name,
-        &cfg.tts.api_key,
-        &cfg.tts.model,
-    )?;
+    let provider = loquitor::tts::create_provider(&cfg.tts.name, &cfg.tts.api_key, &cfg.tts.model)?;
 
     println!("  Speaking: \"{text}\"");
     let audio = provider.synthesize(&text, &cfg.voice.default).await?;

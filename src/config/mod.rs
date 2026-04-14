@@ -51,9 +51,7 @@ pub fn is_legacy_format() -> bool {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return false;
     };
-    let has_legacy_provider = content
-        .lines()
-        .any(|line| line.trim() == "[provider]");
+    let has_legacy_provider = content.lines().any(|line| line.trim() == "[provider]");
     let has_new_tts = content.lines().any(|line| line.trim() == "[tts]");
     has_legacy_provider && !has_new_tts
 }

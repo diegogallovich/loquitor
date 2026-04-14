@@ -108,8 +108,7 @@ impl LaneWatcher {
                         read_any = true;
                         leftover.extend_from_slice(&read_chunk[..n]);
 
-                        while let Some(nl) =
-                            leftover.iter().position(|&b| b == b'\n' || b == b'\r')
+                        while let Some(nl) = leftover.iter().position(|&b| b == b'\n' || b == b'\r')
                         {
                             let line_bytes: Vec<u8> = leftover.drain(..=nl).collect();
                             let raw = String::from_utf8_lossy(&line_bytes);

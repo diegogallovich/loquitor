@@ -17,7 +17,10 @@ fn default_cfg() -> IdleCfg {
 
 #[test]
 fn classify_content_line() {
-    assert_eq!(classify("⏺ I'll start by reading the file."), LineClass::Content);
+    assert_eq!(
+        classify("⏺ I'll start by reading the file."),
+        LineClass::Content
+    );
     assert_eq!(classify("running cargo test"), LineClass::Content);
 }
 
@@ -32,10 +35,7 @@ fn classify_blank_line_is_content() {
 #[test]
 fn classify_pure_box_drawing_line_is_prompt_frame() {
     let frame = "╭────────────────────────────╮";
-    assert_eq!(
-        classify(frame),
-        LineClass::PromptFrame(frame.to_string())
-    );
+    assert_eq!(classify(frame), LineClass::PromptFrame(frame.to_string()));
 }
 
 #[test]

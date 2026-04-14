@@ -45,11 +45,7 @@ pub trait LiaisonProvider: Send + Sync {
 
 /// Build a `LiaisonProvider` from config values. Factored out so the
 /// wizard, daemon, and CLI all resolve the same way.
-pub fn create_provider(
-    name: &str,
-    api_key: &str,
-    model: &str,
-) -> Result<Box<dyn LiaisonProvider>> {
+pub fn create_provider(name: &str, api_key: &str, model: &str) -> Result<Box<dyn LiaisonProvider>> {
     match name {
         "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(api_key, model))),
         "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model))),

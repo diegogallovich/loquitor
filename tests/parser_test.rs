@@ -57,7 +57,9 @@ fn truecolor_black_is_narrative() {
 #[test]
 fn truecolor_non_black_is_not_narrative() {
     // Orange RGB — tool-call colour in Claude Code.
-    assert!(!is_narrative_marker("\x1b[38;2;245;149;117m⏺\x1b[39m Bash(x)"));
+    assert!(!is_narrative_marker(
+        "\x1b[38;2;245;149;117m⏺\x1b[39m Bash(x)"
+    ));
 }
 
 #[test]

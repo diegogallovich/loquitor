@@ -26,11 +26,7 @@ const PROVIDERS: &[ProviderDef] = &[
         display: "Anthropic Claude",
         blurb: "Strongest summaries. Opus is pricier; Haiku is cheap and fast.",
         key_url: "https://console.anthropic.com/settings/keys",
-        models: &[
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5",
-        ],
+        models: &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
     },
     ProviderDef {
         id: "openai",
@@ -55,11 +51,7 @@ const PROVIDERS: &[ProviderDef] = &[
         key_url: "https://www.minimax.io/platform",
         // M2.7 is current flagship (April 2026); M2.5 and M2 are still
         // available as cheaper fallbacks.
-        models: &[
-            "MiniMax-M2.7",
-            "MiniMax-M2.5",
-            "MiniMax-M2",
-        ],
+        models: &["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2"],
     },
 ];
 
@@ -135,7 +127,9 @@ fn resolve_api_key(
         // Avoid duplicating the option if the TTS key and the current
         // liaison key happen to be identical (common when configure_liaison
         // is re-run after configure_tts set the same key).
-        let already_listed = options.iter().any(|(_, v)| v.as_deref() == Some(&tts_cfg.api_key));
+        let already_listed = options
+            .iter()
+            .any(|(_, v)| v.as_deref() == Some(&tts_cfg.api_key));
         if !already_listed {
             options.push((
                 format!("Reuse your {} TTS key (same account)", provider.id),
@@ -209,11 +203,7 @@ fn select_model(provider: &ProviderDef, current_model: Option<&str>) -> Result<S
 fn prompt_new_key(provider: &ProviderDef) -> Result<String> {
     println!();
     if !provider.key_url.is_empty() {
-        println!(
-            "  {} {}",
-            "Get one at:".dimmed(),
-            provider.key_url.dimmed()
-        );
+        println!("  {} {}", "Get one at:".dimmed(), provider.key_url.dimmed());
     }
     println!();
 
@@ -234,4 +224,3 @@ fn prompt_new_key(provider: &ProviderDef) -> Result<String> {
 
     Ok(api_key)
 }
-

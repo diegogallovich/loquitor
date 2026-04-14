@@ -87,7 +87,10 @@ impl LiaisonProvider for OpenAiProvider {
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
-            anyhow::bail!("{} liaison error ({status}): {error_body}", self.display_name);
+            anyhow::bail!(
+                "{} liaison error ({status}): {error_body}",
+                self.display_name
+            );
         }
 
         let json: serde_json::Value = response

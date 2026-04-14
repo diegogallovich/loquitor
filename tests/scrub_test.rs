@@ -2,8 +2,13 @@ use loquitor::liaison::scrub::{scrub, scrub_text};
 
 #[test]
 fn redacts_openai_style_key() {
-    let out = scrub_text("curl -H 'Authorization: Bearer sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' x.com");
-    assert!(!out.contains("sk-proj"), "OpenAI-style sk- key leaked: {out}");
+    let out = scrub_text(
+        "curl -H 'Authorization: Bearer sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' x.com",
+    );
+    assert!(
+        !out.contains("sk-proj"),
+        "OpenAI-style sk- key leaked: {out}"
+    );
     assert!(out.contains("[REDACTED]"));
 }
 
@@ -18,7 +23,7 @@ fn redacts_anthropic_specific_prefix_before_generic() {
 fn redacts_github_tokens() {
     let inputs = [
         "token ghp_abcdefghijklmnopqrstuvwxyz0123456789 active",
-        "GHO_abcdefghijklmnopqrstuvwxyz0123456789",   // case-insensitive not required: they're case-specific
+        "GHO_abcdefghijklmnopqrstuvwxyz0123456789", // case-insensitive not required: they're case-specific
         "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
     ];
     for raw in inputs {
@@ -26,7 +31,10 @@ fn redacts_github_tokens() {
         // Only lowercase-prefix tokens are in-scope (ghp_/gho_/ghs_/ghu_/ghr_).
         if raw.starts_with("GHO_") {
             // Uppercase token should NOT be redacted — it's not a real GitHub shape.
-            assert!(out.contains("GHO_"), "should not touch uppercase variant: {out}");
+            assert!(
+                out.contains("GHO_"),
+                "should not touch uppercase variant: {out}"
+            );
         } else {
             assert!(!out.contains("abcdefghij"), "token survived: {out}");
             assert!(out.contains("[REDACTED]"));

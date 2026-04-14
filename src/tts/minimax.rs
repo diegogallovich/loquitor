@@ -66,7 +66,11 @@ const MINIMAX_VOICES: &[(&str, &str, &str)] = &[
     ("male-qn-badao", "Badao (中文)", "Chinese, male dominant"),
     ("female-chengshu", "Chengshu (中文)", "Chinese, female wise"),
     ("female-tianmei", "Tianmei (中文)", "Chinese, female sweet"),
-    ("presenter_male", "Presenter Male (中文)", "Chinese, presenter"),
+    (
+        "presenter_male",
+        "Presenter Male (中文)",
+        "Chinese, presenter",
+    ),
     (
         "presenter_female",
         "Presenter Female (中文)",

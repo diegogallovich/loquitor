@@ -7,19 +7,13 @@ use dialoguer::{theme::ColorfulTheme, Select};
 /// pre-selected, and a one-line explanation of each option is printed below
 /// the list so the choice is self-documenting.
 pub fn select_lane_policy(current: VoiceMode) -> Result<VoiceMode> {
-    let options = [
-        VoiceMode::Shared,
-        VoiceMode::PerLane,
-    ];
+    let options = [VoiceMode::Shared, VoiceMode::PerLane];
     let labels = [
         "Shared — every lane uses the default voice",
         "Per-lane — each lane can have its own voice (recommended for multi-session users)",
     ];
 
-    let default_idx = options
-        .iter()
-        .position(|m| *m == current)
-        .unwrap_or(1); // PerLane is the documented default
+    let default_idx = options.iter().position(|m| *m == current).unwrap_or(1); // PerLane is the documented default
 
     println!();
     println!(

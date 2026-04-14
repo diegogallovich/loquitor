@@ -18,8 +18,14 @@ jobs:
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          # Pin to ubuntu-22.04 (jammy) because the cross-compile step
+          # below adds jammy ports archive sources for arm64. When this
+          # said `ubuntu-latest`, GitHub flipped it to ubuntu-24.04
+          # (noble) and the jammy `Packages` files 404'd, breaking the
+          # whole release. Re-pin to a noble matrix when the cross-
+          # compile step is updated to match.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
 
     runs-on: ${{ matrix.os }}
     steps:

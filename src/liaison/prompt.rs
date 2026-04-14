@@ -6,7 +6,8 @@
 
 use super::{TurnContext, TurnSummary};
 
-pub const SYSTEM_PROMPT: &str = "You summarize terminal output from a Claude Code session for a voice assistant. \
+pub const SYSTEM_PROMPT: &str =
+    "You summarize terminal output from a Claude Code session for a voice assistant. \
 Output exactly ONE spoken sentence, present tense, under 40 words. \
 Describe what Claude finished doing and what it is waiting on the user for. \
 Do not read code verbatim. Do not list file paths unless the path is the point.";

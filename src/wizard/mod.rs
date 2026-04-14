@@ -35,11 +35,8 @@ pub async fn run_wizard() -> Result<()> {
     // Instantiate the TTS provider so we can list voices and run the audio test.
     // The liaison provider isn't instantiated here — it'll be exercised end-to-end
     // at the demo step (PR6 turns this into a real synthetic-turn demo).
-    let tts_provider = tts::create_provider(
-        &tts_config.name,
-        &tts_config.api_key,
-        &tts_config.model,
-    )?;
+    let tts_provider =
+        tts::create_provider(&tts_config.name, &tts_config.api_key, &tts_config.model)?;
 
     // Step 4: Voice selection
     let voice_id = voice::select_voice(tts_provider.as_ref(), None).await?;
@@ -133,11 +130,7 @@ pub async fn configure_liaison() -> Result<()> {
 /// pool is preserved and extended if the new voice isn't already in it.
 pub async fn configure_voice() -> Result<()> {
     let mut cfg = config::load()?;
-    let tts_provider = tts::create_provider(
-        &cfg.tts.name,
-        &cfg.tts.api_key,
-        &cfg.tts.model,
-    )?;
+    let tts_provider = tts::create_provider(&cfg.tts.name, &cfg.tts.api_key, &cfg.tts.model)?;
 
     let new_voice =
         voice::select_voice(tts_provider.as_ref(), Some(cfg.voice.default.as_str())).await?;

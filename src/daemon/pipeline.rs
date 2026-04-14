@@ -25,11 +25,8 @@ use tracing::{info, warn};
 pub async fn run(config: Config, lanes_dir: PathBuf) -> Result<()> {
     info!("Starting daemon pipeline");
 
-    let tts_provider = tts::create_provider(
-        &config.tts.name,
-        &config.tts.api_key,
-        &config.tts.model,
-    )?;
+    let tts_provider =
+        tts::create_provider(&config.tts.name, &config.tts.api_key, &config.tts.model)?;
     let liaison_provider = liaison::create_provider(
         &config.liaison.name,
         &config.liaison.api_key,

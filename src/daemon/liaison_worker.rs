@@ -160,9 +160,8 @@ pub fn should_scrub(config: &Config) -> bool {
         "ollama" => false,
         "openai_compat" => {
             let url = config.liaison.base_url.to_lowercase();
-            let is_local = url.contains("127.0.0.1")
-                || url.contains("localhost")
-                || url.contains(".local");
+            let is_local =
+                url.contains("127.0.0.1") || url.contains("localhost") || url.contains(".local");
             if is_local {
                 false
             } else {
@@ -192,7 +191,11 @@ pub fn classify_error(err: &anyhow::Error) -> &'static str {
         || msg.contains("connect error")
     {
         "network error"
-    } else if msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504") {
+    } else if msg.contains("500")
+        || msg.contains("502")
+        || msg.contains("503")
+        || msg.contains("504")
+    {
         "a provider outage"
     } else {
         "an unknown error"
