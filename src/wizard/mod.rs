@@ -16,11 +16,18 @@ pub async fn run_wizard() -> Result<()> {
     // Step 1: Banner
     print_banner();
 
+    // Best-effort load of whatever config is already on disk, including
+    // migration of legacy `[provider]` → `[tts]` so the sub-wizards can
+    // offer "Keep existing key" for anything you already set up.
+    let existing = config::try_load_for_wizard();
+    let existing_tts = existing.as_ref().map(|c| &c.tts);
+    let existing_liaison = existing.as_ref().map(|c| &c.liaison);
+
     // Step 2: TTS provider selection (+ API key if cloud provider)
-    let tts_config = provider::select_provider(None)?;
+    let tts_config = provider::select_provider(existing_tts)?;
 
     // Step 3: Liaison (summary LLM) provider selection
-    let liaison_config = liaison::select_liaison(None)?;
+    let liaison_config = liaison::select_liaison(existing_liaison)?;
 
     // Instantiate the TTS provider so we can list voices and run the audio test.
     // The liaison provider isn't instantiated here — it'll be exercised end-to-end

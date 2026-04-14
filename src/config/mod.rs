@@ -51,15 +51,59 @@ pub fn is_legacy_format() -> bool {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return false;
     };
-    // A legacy config has `[provider]` as a top-level table but lacks the
-    // new `[tts]` or `[liaison]` tables. We check for the exact line rather
-    // than a substring match so a comment mentioning `[provider]` doesn't
-    // give a false positive.
     let has_legacy_provider = content
         .lines()
         .any(|line| line.trim() == "[provider]");
     let has_new_tts = content.lines().any(|line| line.trim() == "[tts]");
     has_legacy_provider && !has_new_tts
+}
+
+/// Best-effort load of any existing config — returns a `Config` whose
+/// `tts` (and where possible `liaison`) fields are populated with
+/// whatever we could extract, so the init wizard can offer
+/// "keep existing key" prompts instead of forcing re-entry.
+///
+/// Handles three cases:
+///   - v0.2.0 config that round-trips cleanly → parsed as-is.
+///   - v0.1.0 legacy `[provider]` block → migrated: `provider.*`
+///     becomes `tts.*`, the rest of the `Config` falls back to
+///     defaults, and `liaison` starts blank.
+///   - No config / unreadable / genuinely malformed → `None`; caller
+///     treats as first-time setup.
+pub fn try_load_for_wizard() -> Option<types::Config> {
+    let content = std::fs::read_to_string(config_path()).ok()?;
+
+    // v0.2.0 happy path.
+    if let Ok(cfg) = toml::from_str::<types::Config>(&content) {
+        return Some(cfg);
+    }
+
+    // Legacy migration. We parse loosely via `toml::Value` so unknown
+    // fields from v0.1.0 don't force a typed-deserialise failure.
+    let value: toml::Value = toml::from_str(&content).ok()?;
+    let provider = value.get("provider")?;
+    let name = provider.get("name")?.as_str()?.to_string();
+    let api_key = provider
+        .get("api_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = provider
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // `liaison` intentionally stays at defaults (anthropic, empty key)
+    // so `select_liaison` prompts fresh the first time.
+    Some(types::Config {
+        tts: types::TtsConfig {
+            name,
+            api_key,
+            model,
+        },
+        ..types::Config::default()
+    })
 }
 
 pub fn save(config: &Config) -> Result<()> {
