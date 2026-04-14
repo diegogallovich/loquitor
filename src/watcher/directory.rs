@@ -1,5 +1,5 @@
 use super::idle::IdleCfg;
-use super::lane::{LaneMessage, LaneWatcher};
+use super::lane::{LaneWatcher, TurnReady};
 use crate::audio::LaneId;
 use crate::config::types::Config;
 use anyhow::Result;
@@ -12,15 +12,15 @@ use tracing::{debug, info, warn};
 pub struct DirectoryWatcher {
     lanes_dir: PathBuf,
     config: Config,
-    lane_tx: mpsc::Sender<LaneMessage>,
+    turn_tx: mpsc::Sender<TurnReady>,
 }
 
 impl DirectoryWatcher {
-    pub fn new(lanes_dir: PathBuf, config: Config, lane_tx: mpsc::Sender<LaneMessage>) -> Self {
+    pub fn new(lanes_dir: PathBuf, config: Config, turn_tx: mpsc::Sender<TurnReady>) -> Self {
         Self {
             lanes_dir,
             config,
-            lane_tx,
+            turn_tx,
         }
     }
 
@@ -72,8 +72,9 @@ impl DirectoryWatcher {
         let mut lane_watcher = LaneWatcher::new(
             lane_id.clone(),
             path,
-            self.lane_tx.clone(),
+            self.turn_tx.clone(),
             idle_cfg,
+            self.config.daemon.turn_buffer_max_bytes,
         );
 
         tokio::spawn(async move {
