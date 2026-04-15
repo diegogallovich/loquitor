@@ -1,3 +1,4 @@
+use super::activity::contains_activity_indicator;
 use super::idle::{self, IdleCfg, IdleState, LineClass, TurnEvent};
 use super::parser::strip_ansi;
 use crate::audio::LaneId;
@@ -47,6 +48,11 @@ pub struct LaneWatcher {
     buffer_bytes: usize,
     truncated: bool,
     turn_started: Option<Instant>,
+    /// Last `Instant` at which a read burst contained one of
+    /// Claude's activity-indicator substrings (see activity.rs).
+    /// While this is recent, the turn is NOT idle — Claude is
+    /// actively working, even if the byte stream itself is quiet.
+    last_activity_at: Option<Instant>,
 }
 
 impl LaneWatcher {
@@ -68,6 +74,7 @@ impl LaneWatcher {
             buffer_bytes: 0,
             truncated: false,
             turn_started: None,
+            last_activity_at: None,
         }
     }
 
@@ -109,6 +116,28 @@ impl LaneWatcher {
                     Ok(n) => {
                         read_any = true;
                         burst_bytes += n;
+                        // Scan the raw chunk for Claude's activity
+                        // indicator. If seen, treat this burst as a
+                        // "content" event for the idle state machine,
+                        // refreshing `last_content_at`. This prevents
+                        // `idle::tick` from firing prematurely during
+                        // tool execution or long thinking pauses —
+                        // the spinner keeps redrawing even when the
+                        // byte-level stream gets quiet, so its
+                        // presence is a reliable "still working"
+                        // signal.
+                        if contains_activity_indicator(&read_chunk[..n]) {
+                            let now = Instant::now();
+                            self.last_activity_at = Some(now);
+                            // Feed Content so last_content_at is
+                            // refreshed in whichever state we're in.
+                            idle::feed(
+                                &mut self.idle_state,
+                                idle::LineClass::Content,
+                                now,
+                                &self.idle_cfg,
+                            );
+                        }
                         leftover.extend_from_slice(&read_chunk[..n]);
 
                         while let Some(nl) = leftover.iter().position(|&b| b == b'\n' || b == b'\r')
@@ -167,14 +196,23 @@ impl LaneWatcher {
         }
     }
 
-    /// Time-based check called every poll iteration. Returns a
-    /// `TurnReady` when `idle::tick` decides the turn is over (no
-    /// content for `quiet_threshold`, OR `turn_max_duration` cap).
+    /// Time-based check called every poll iteration. Fires when
+    /// `idle::tick` decides the turn is over (no content for
+    /// `quiet_threshold`, OR `turn_max_duration` cap).
+    ///
+    /// Activity-indicator sightings are fed into the state machine
+    /// as content events (see the read loop), so `idle::tick`
+    /// already accounts for them — a running spinner counts as
+    /// activity even when the byte stream is sparse, preventing
+    /// premature fires during tool execution / thinking phases.
     fn tick(&mut self, now: Instant) -> Option<TurnReady> {
         let before_state = self.idle_state.name();
         let quiet_before = self
             .idle_state
             .last_content_at()
+            .map(|t| now.saturating_duration_since(t));
+        let activity_before = self
+            .last_activity_at
             .map(|t| now.saturating_duration_since(t));
         let event = idle::tick(&mut self.idle_state, now, &self.idle_cfg);
         if event == Some(idle::TurnEvent::TurnEnded) {
@@ -190,6 +228,7 @@ impl LaneWatcher {
                 lane = %self.lane_id,
                 reason,
                 quiet_ms = quiet_before.map(|d| d.as_millis() as u64).unwrap_or(0),
+                activity_age_ms = activity_before.map(|d| d.as_millis() as u64).unwrap_or(0),
                 quiet_threshold_ms = self.idle_cfg.quiet_threshold.as_millis() as u64,
                 state_was = before_state,
                 buffer_bytes = self.buffer_bytes,
