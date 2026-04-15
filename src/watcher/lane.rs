@@ -50,9 +50,37 @@ pub struct LaneWatcher {
     turn_started: Option<Instant>,
     /// Last `Instant` at which a read burst contained one of
     /// Claude's activity-indicator substrings (see activity.rs).
-    /// While this is recent, the turn is NOT idle — Claude is
-    /// actively working, even if the byte stream itself is quiet.
+    /// Soft signal: keeps the quiet timer fresh during tool execution
+    /// when a spinner is rendering but the byte stream is sparse.
     last_activity_at: Option<Instant>,
+    /// **Hard** gate on firing a TurnReady. Only set `true` when a
+    /// `⏺` character appears in the raw byte stream — that's
+    /// Claude's own response marker (narrative AND tool-call). If
+    /// the bytes in this turn were nothing but UI chrome (slash
+    /// command menu, user typing, status-bar redraws), this stays
+    /// false and we refuse to fire. Menu text should not be sent
+    /// to the LLM to summarise — it isn't a Claude response.
+    saw_narrative_marker: bool,
+}
+
+/// UTF-8 encoding of `⏺` (U+23FA WHITE CIRCLE). Scanned as raw bytes
+/// so we don't care about interleaved ANSI escapes or streaming
+/// chunking boundaries — as long as the three bytes appear
+/// contiguously somewhere in a read burst, the turn has Claude
+/// output in it.
+const NARRATIVE_MARKER_BYTES: &[u8] = "⏺".as_bytes();
+
+/// Byte-level scan for Claude's ⏺ response marker. The character is
+/// emitted byte-contiguous even when ANSI color codes wrap it (the
+/// colour escapes come before / after, not between the UTF-8 bytes),
+/// so a naive window search is sufficient.
+fn contains_narrative_marker(chunk: &[u8]) -> bool {
+    if chunk.len() < NARRATIVE_MARKER_BYTES.len() {
+        return false;
+    }
+    chunk
+        .windows(NARRATIVE_MARKER_BYTES.len())
+        .any(|w| w == NARRATIVE_MARKER_BYTES)
 }
 
 impl LaneWatcher {
@@ -75,6 +103,7 @@ impl LaneWatcher {
             truncated: false,
             turn_started: None,
             last_activity_at: None,
+            saw_narrative_marker: false,
         }
     }
 
@@ -116,21 +145,16 @@ impl LaneWatcher {
                     Ok(n) => {
                         read_any = true;
                         burst_bytes += n;
-                        // Scan the raw chunk for Claude's activity
-                        // indicator. If seen, treat this burst as a
-                        // "content" event for the idle state machine,
-                        // refreshing `last_content_at`. This prevents
-                        // `idle::tick` from firing prematurely during
-                        // tool execution or long thinking pauses —
-                        // the spinner keeps redrawing even when the
-                        // byte-level stream gets quiet, so its
-                        // presence is a reliable "still working"
-                        // signal.
-                        if contains_activity_indicator(&read_chunk[..n]) {
+                        let chunk = &read_chunk[..n];
+
+                        // Soft signal: activity indicator = spinner
+                        // / "thinking…" text. Keeps the quiet timer
+                        // fresh during tool execution / long thinking
+                        // pauses by feeding a synthetic Content event
+                        // into the state machine.
+                        if contains_activity_indicator(chunk) {
                             let now = Instant::now();
                             self.last_activity_at = Some(now);
-                            // Feed Content so last_content_at is
-                            // refreshed in whichever state we're in.
                             idle::feed(
                                 &mut self.idle_state,
                                 idle::LineClass::Content,
@@ -138,7 +162,33 @@ impl LaneWatcher {
                                 &self.idle_cfg,
                             );
                         }
-                        leftover.extend_from_slice(&read_chunk[..n]);
+
+                        // Hard gate: the ⏺ character is Claude's own
+                        // output marker (narrative + tool calls). If
+                        // it's never seen in this turn, the whole
+                        // buffer is just UI chrome and we must NOT
+                        // fire — that's how the slash-command-menu
+                        // category error arose in Diego's trace.
+                        //
+                        // On the *first* sighting in a turn, we also
+                        // clear the pre-marker buffer: anything
+                        // buffered before the first ⏺ was menu
+                        // chrome / user typing / status redraws, and
+                        // shouldn't reach the LLM.
+                        if !self.saw_narrative_marker && contains_narrative_marker(chunk) {
+                            debug!(
+                                lane = %self.lane_id,
+                                dropped_prefix_bytes = self.buffer_bytes,
+                                dropped_prefix_lines = self.buffer.len(),
+                                "First ⏺ seen — clearing pre-marker chrome from buffer"
+                            );
+                            self.buffer.clear();
+                            self.buffer_bytes = 0;
+                            self.truncated = false;
+                            self.saw_narrative_marker = true;
+                        }
+
+                        leftover.extend_from_slice(chunk);
 
                         while let Some(nl) = leftover.iter().position(|&b| b == b'\n' || b == b'\r')
                         {
@@ -197,14 +247,10 @@ impl LaneWatcher {
     }
 
     /// Time-based check called every poll iteration. Fires when
-    /// `idle::tick` decides the turn is over (no content for
-    /// `quiet_threshold`, OR `turn_max_duration` cap).
-    ///
-    /// Activity-indicator sightings are fed into the state machine
-    /// as content events (see the read loop), so `idle::tick`
-    /// already accounts for them — a running spinner counts as
-    /// activity even when the byte stream is sparse, preventing
-    /// premature fires during tool execution / thinking phases.
+    /// `idle::tick` decides the turn is over AND this turn actually
+    /// contained Claude output (a `⏺` marker). If no marker was
+    /// seen, the buffered bytes are just UI chrome — silently reset
+    /// and wait for a real turn.
     fn tick(&mut self, now: Instant) -> Option<TurnReady> {
         let before_state = self.idle_state.name();
         let quiet_before = self
@@ -215,30 +261,47 @@ impl LaneWatcher {
             .last_activity_at
             .map(|t| now.saturating_duration_since(t));
         let event = idle::tick(&mut self.idle_state, now, &self.idle_cfg);
-        if event == Some(idle::TurnEvent::TurnEnded) {
-            let reason = if quiet_before
-                .map(|q| q >= self.idle_cfg.quiet_threshold)
-                .unwrap_or(false)
-            {
-                "inactivity"
-            } else {
-                "force-ship (turn_max_duration)"
-            };
-            info!(
-                lane = %self.lane_id,
-                reason,
-                quiet_ms = quiet_before.map(|d| d.as_millis() as u64).unwrap_or(0),
-                activity_age_ms = activity_before.map(|d| d.as_millis() as u64).unwrap_or(0),
-                quiet_threshold_ms = self.idle_cfg.quiet_threshold.as_millis() as u64,
-                state_was = before_state,
-                buffer_bytes = self.buffer_bytes,
-                buffer_lines = self.buffer.len(),
-                "Idle → TurnEnded"
-            );
-            self.flush(now)
-        } else {
-            None
+        if event != Some(idle::TurnEvent::TurnEnded) {
+            return None;
         }
+
+        // Hard gate on the ⏺ marker — no Claude output = no fire.
+        if !self.saw_narrative_marker {
+            debug!(
+                lane = %self.lane_id,
+                quiet_ms = quiet_before.map(|d| d.as_millis() as u64).unwrap_or(0),
+                buffer_bytes = self.buffer_bytes,
+                "Idle timer fired but no ⏺ seen this turn — discarding UI-only buffer"
+            );
+            self.buffer.clear();
+            self.buffer_bytes = 0;
+            self.truncated = false;
+            self.turn_started = None;
+            // idle::tick already reset idle_state to Idle; next
+            // Content line opens a fresh turn cleanly.
+            return None;
+        }
+
+        let reason = if quiet_before
+            .map(|q| q >= self.idle_cfg.quiet_threshold)
+            .unwrap_or(false)
+        {
+            "inactivity"
+        } else {
+            "force-ship (turn_max_duration)"
+        };
+        info!(
+            lane = %self.lane_id,
+            reason,
+            quiet_ms = quiet_before.map(|d| d.as_millis() as u64).unwrap_or(0),
+            activity_age_ms = activity_before.map(|d| d.as_millis() as u64).unwrap_or(0),
+            quiet_threshold_ms = self.idle_cfg.quiet_threshold.as_millis() as u64,
+            state_was = before_state,
+            buffer_bytes = self.buffer_bytes,
+            buffer_lines = self.buffer.len(),
+            "Idle → TurnEnded"
+        );
+        self.flush(now)
     }
 
     /// Drain the per-turn buffer into a `TurnReady`. Called from both
@@ -254,6 +317,8 @@ impl LaneWatcher {
         self.truncated = false;
         let body: String = std::mem::take(&mut self.buffer).into_iter().collect();
         self.buffer_bytes = 0;
+        // Reset the narrative gate — a fresh turn has to earn its own ⏺.
+        self.saw_narrative_marker = false;
         let turn_text = if truncated {
             format!("[earlier output truncated]\n{body}")
         } else {
