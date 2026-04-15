@@ -16,7 +16,7 @@
 //! with the lane the listener needs to hear.
 
 use crate::config::{self, types::Config};
-use crate::liaison::scrub::scrub_text;
+use crate::liaison::scrub::{scrub, scrub_text};
 use crate::liaison::{LiaisonProvider, TurnContext};
 use crate::watcher::lane::TurnReady;
 use futures::stream::{FuturesOrdered, StreamExt};
@@ -115,24 +115,57 @@ pub async fn handle_turn(
     liaison: &dyn LiaisonProvider,
 ) -> SummarizedTurn {
     let lane_name = config::resolve_lane_name(config, &turn.lane_id);
+    let turn_duration = turn.ended_at.saturating_duration_since(turn.started_at);
+    info!(
+        lane = %turn.lane_id,
+        lane_name = %lane_name,
+        turn_bytes = turn.turn_text.len(),
+        truncated = turn.truncated,
+        turn_duration_ms = turn_duration.as_millis() as u64,
+        "TurnReady → liaison"
+    );
 
-    let cleaned_log = if should_scrub(config) {
-        scrub_text(&turn.turn_text)
+    let raw_bytes = turn.turn_text.len();
+    let (cleaned_log, scrubbed) = if should_scrub(config) {
+        let res = scrub(&turn.turn_text);
+        if res.redaction_count > 0 {
+            info!(
+                lane = %turn.lane_id,
+                redactions = res.redaction_count,
+                "Scrubbed secrets before liaison call"
+            );
+        }
+        (res.text, true)
     } else {
-        turn.turn_text
+        (turn.turn_text, false)
     };
+    let _ = scrub_text; // retain the public re-export path for liaison_test.rs
 
     let ctx = TurnContext {
         cleaned_log: &cleaned_log,
         max_output_tokens: config.liaison.max_output_tokens,
     };
 
+    let llm_start = std::time::Instant::now();
     let summary_text = match liaison.summarize_turn(&ctx).await {
-        Ok(summary) => summary.text,
+        Ok(summary) => {
+            info!(
+                lane = %turn.lane_id,
+                provider = %liaison.name(),
+                latency_ms = llm_start.elapsed().as_millis() as u64,
+                summary_bytes = summary.text.len(),
+                sent_bytes = cleaned_log.len(),
+                scrubbed,
+                raw_bytes,
+                "Liaison ok"
+            );
+            summary.text
+        }
         Err(e) => {
             warn!(
                 lane = %turn.lane_id,
                 error = %e,
+                latency_ms = llm_start.elapsed().as_millis() as u64,
                 "Liaison summarization failed; using canned fallback"
             );
             format!("Summary unavailable — {}.", classify_error(&e))

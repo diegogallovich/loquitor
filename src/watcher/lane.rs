@@ -101,15 +101,19 @@ impl LaneWatcher {
 
         loop {
             let mut read_any = false;
+            let mut burst_bytes = 0usize;
+            let mut burst_lines = 0usize;
             loop {
                 match reader.read(&mut read_chunk).await {
                     Ok(0) => break,
                     Ok(n) => {
                         read_any = true;
+                        burst_bytes += n;
                         leftover.extend_from_slice(&read_chunk[..n]);
 
                         while let Some(nl) = leftover.iter().position(|&b| b == b'\n' || b == b'\r')
                         {
+                            burst_lines += 1;
                             let line_bytes: Vec<u8> = leftover.drain(..=nl).collect();
                             let raw = String::from_utf8_lossy(&line_bytes);
                             if let Some(event) = self.process_line(&raw) {
@@ -130,14 +134,24 @@ impl LaneWatcher {
                 }
             }
 
+            if read_any {
+                debug!(
+                    lane = %self.lane_id,
+                    bytes = burst_bytes,
+                    lines = burst_lines,
+                    state = self.idle_state.name(),
+                    buffer_bytes = self.buffer_bytes,
+                    "Read burst"
+                );
+            }
+
             // After draining whatever's available, ask the idle
             // detector if enough quiet time has passed to call the
-            // turn ended. This is the *primary* idle signal — it
-            // fires regardless of whether the TUI ever emits a clean
-            // box-drawing-only prompt frame, which the real Claude
-            // Code prompt does NOT (it includes status text like
-            // "Opus 4.6 (1M context) · 8% ctx · main").
-            if let Some(event) = self.tick(Instant::now()) {
+            // turn ended. Primary signal is inactivity-based — see
+            // idle.rs for why a prompt-frame pattern match isn't
+            // reliable for real Claude Code output.
+            let now = Instant::now();
+            if let Some(event) = self.tick(now) {
                 if self.turn_tx.send(event).await.is_err() {
                     info!(
                         lane = %self.lane_id,
@@ -157,8 +171,31 @@ impl LaneWatcher {
     /// `TurnReady` when `idle::tick` decides the turn is over (no
     /// content for `quiet_threshold`, OR `turn_max_duration` cap).
     fn tick(&mut self, now: Instant) -> Option<TurnReady> {
+        let before_state = self.idle_state.name();
+        let quiet_before = self
+            .idle_state
+            .last_content_at()
+            .map(|t| now.saturating_duration_since(t));
         let event = idle::tick(&mut self.idle_state, now, &self.idle_cfg);
         if event == Some(idle::TurnEvent::TurnEnded) {
+            let reason = if quiet_before
+                .map(|q| q >= self.idle_cfg.quiet_threshold)
+                .unwrap_or(false)
+            {
+                "inactivity"
+            } else {
+                "force-ship (turn_max_duration)"
+            };
+            info!(
+                lane = %self.lane_id,
+                reason,
+                quiet_ms = quiet_before.map(|d| d.as_millis() as u64).unwrap_or(0),
+                quiet_threshold_ms = self.idle_cfg.quiet_threshold.as_millis() as u64,
+                state_was = before_state,
+                buffer_bytes = self.buffer_bytes,
+                buffer_lines = self.buffer.len(),
+                "Idle → TurnEnded"
+            );
             self.flush(now)
         } else {
             None

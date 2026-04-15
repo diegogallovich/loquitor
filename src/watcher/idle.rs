@@ -59,6 +59,29 @@ impl IdleState {
     pub fn new() -> Self {
         Self::Idle
     }
+
+    /// Short name for logs/metrics. Stable strings.
+    pub fn name(&self) -> &'static str {
+        match self {
+            IdleState::Idle => "Idle",
+            IdleState::Collecting { .. } => "Collecting",
+            IdleState::PossibleIdle { .. } => "PossibleIdle",
+        }
+    }
+
+    /// Last `Instant` at which a content line arrived — useful for
+    /// logging the quiet duration around fire/no-fire decisions.
+    pub fn last_content_at(&self) -> Option<Instant> {
+        match self {
+            IdleState::Idle => None,
+            IdleState::Collecting {
+                last_content_at, ..
+            } => Some(*last_content_at),
+            IdleState::PossibleIdle {
+                last_content_at, ..
+            } => Some(*last_content_at),
+        }
+    }
 }
 
 impl Default for IdleState {

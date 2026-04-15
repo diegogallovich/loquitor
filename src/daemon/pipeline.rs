@@ -63,8 +63,23 @@ pub async fn run(config: Config, lanes_dir: PathBuf) -> Result<()> {
     // per summary so rate-limit and cost pressure stay predictable.
     while let Some(s) = summary_rx.recv().await {
         let voice = config::resolve_voice(&config, &s.lane_id);
+        info!(
+            lane = %s.lane_id,
+            lane_name = %s.lane_name,
+            voice = %voice,
+            text_bytes = s.text.len(),
+            "SummarizedTurn → TTS"
+        );
+        let tts_start = Instant::now();
         match tts_provider.synthesize(&s.text, &voice).await {
             Ok(audio) => {
+                info!(
+                    lane = %s.lane_id,
+                    voice = %voice,
+                    latency_ms = tts_start.elapsed().as_millis() as u64,
+                    audio_bytes = audio.bytes.len(),
+                    "TTS ok"
+                );
                 let utter = Utterance {
                     lane_id: s.lane_id,
                     audio,

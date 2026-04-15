@@ -3,7 +3,7 @@ pub mod player;
 use crate::tts::AudioData;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 pub type LaneId = String;
 
@@ -32,28 +32,36 @@ impl AudioQueue {
         while let Some(utterance) = self.rx.recv().await {
             let age = utterance.enqueued_at.elapsed();
             if age > self.stale_threshold {
-                debug!(
+                warn!(
                     lane = %utterance.lane_id,
-                    text = %utterance.text,
+                    text_preview = %utterance.text.chars().take(80).collect::<String>(),
                     age_secs = age.as_secs(),
+                    stale_threshold_secs = self.stale_threshold.as_secs(),
                     "Dropping stale utterance"
                 );
                 continue;
             }
 
-            debug!(
+            info!(
                 lane = %utterance.lane_id,
-                text = %utterance.text,
+                text_bytes = utterance.text.len(),
+                audio_bytes = utterance.audio.bytes.len(),
+                waited_ms = age.as_millis() as u64,
                 "Playing utterance"
             );
 
             // Offload blocking playback to a blocking thread so we don't stall the tokio runtime.
             let audio_clone = utterance.audio.clone();
+            let play_start = std::time::Instant::now();
             let result =
                 tokio::task::spawn_blocking(move || player::play_audio(&audio_clone)).await;
 
             match result {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => info!(
+                    lane = %utterance.lane_id,
+                    duration_ms = play_start.elapsed().as_millis() as u64,
+                    "Playback done"
+                ),
                 Ok(Err(e)) => warn!(error = %e, "Failed to play audio"),
                 Err(join_err) => warn!(error = %join_err, "Playback task panicked"),
             }

@@ -138,7 +138,11 @@ fn default_idle_min_silence_ms() -> u64 {
     500
 }
 fn default_idle_quiet_ms() -> u64 {
-    3000
+    // Bumped from 3s → 5s because 3s catches mid-turn pauses (tool
+    // calls, network round-trips, Claude's own thinking gaps) and
+    // misfires. 5s still feels snappy to the listener, rides through
+    // most transient silences. Users can tune via [daemon].idle_quiet_ms.
+    5000
 }
 fn default_turn_buffer_max_bytes() -> usize {
     262144
